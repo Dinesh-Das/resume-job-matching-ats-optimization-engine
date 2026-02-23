@@ -37,12 +37,13 @@ def compute_scores(resume_vector, job_matrix) -> np.ndarray:
             similarities_gpu = job_gpu.dot(resume_gpu.T).toarray().flatten()
             similarities = cp.asnumpy(similarities_gpu)
         except Exception as e:
-            logger.warning(f"GPU matrix multiplication failed ({e}). Falling back to CPU.")
-            from sklearn.metrics.pairwise import cosine_similarity
-            similarities = cosine_similarity(resume_vector, job_matrix).flatten()
+            logger.warning(f"GPU matrix multiplication failed ({e}). Falling back to CPU dot product.")
+            from scipy import sparse
+            # Same math applies on CPU:
+            similarities = (job_matrix.dot(resume_vector.T)).toarray().flatten()
     else:
-        from sklearn.metrics.pairwise import cosine_similarity
-        similarities = cosine_similarity(resume_vector, job_matrix).flatten()
+        from scipy import sparse
+        similarities = (job_matrix.dot(resume_vector.T)).toarray().flatten()
 
     scores = np.clip(similarities * SCORE_SCALE, 0, 100)
     return scores

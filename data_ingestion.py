@@ -7,6 +7,7 @@ Supports both direct CSV uploads and Oracle-exported JSON (via oracle_connector)
 
 import json
 import pandas as pd
+import numpy as np
 import hashlib
 import logging
 
@@ -89,14 +90,26 @@ def _load_json_flexible(path: str) -> pd.DataFrame:
 
 def deduplicate_jobs(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Remove duplicate jobs based on title + description.
+    Remove duplicate jobs based primarily on URL.
+    Falls back to title + description if URL is missing or empty.
     Uses vectorized string operations for maximum speed.
     """
     before = len(df)
     
-    # Create a temporary column for deduplication using vectorized operations
-    dedup_key = (df["title"].fillna("").str.strip().str.lower() + 
-                 df["jobdescription"].fillna("").str.strip().str.lower())
+    # 1. Use URL if it exists in the dataframe, otherwise use empty strings
+    if "url" in df.columns:
+        url_col = df["url"].fillna("").str.strip()
+    else:
+        url_col = pd.Series([""] * len(df), index=df.index)
+        
+    # 2. Compute a fallback key (title + description)
+    fallback_key = (df["title"].fillna("").str.strip().str.lower() + 
+                    df["jobdescription"].fillna("").str.strip().str.lower())
+    
+    # 3. Create a final deduplication key. 
+    # If the URL is missing, we prefix with "FALLBACK_" and attach the fallback string.
+    # If the URL exists, we just use the URL.
+    dedup_key = np.where(url_col != "", url_col, "FALLBACK_" + fallback_key)
                  
     df = df.assign(_dedup_key=dedup_key).drop_duplicates(subset="_dedup_key").drop(columns="_dedup_key").reset_index(drop=True)
     

@@ -251,10 +251,10 @@ No parameters. Requires `data/jobs.json` to exist.
 
 | Resource | Configuration |
 |---|---|
-| CPU (20 cores) | 18 parallel workers via `ProcessPoolExecutor` (centralized in `config.py`) |
-| GPU (RTX 4060) | CuPy for cosine similarity; spaCy GPU acceleration |
-| RAM (32 GB) | 30 GB hard limit enforced by `resource_monitor.py` with warnings at 80% |
-| Batching | 2000-item chunks for text processing, skill extraction, and NLP pipeline |
+| CPU (20 cores) | Dynamic parallel workers via `joblib.externals.loky` utilizing hardware limits automatically (native multi-processing) |
+| GPU (RTX 4060) | CuPy sparse matrix multiplication for instant sub-second cosine similarity matching across 400k+ models |
+| RAM (32 GB) | 30 GB hard limit enforced by `resource_monitor.py` with dynamic string mapping to prevent OOM errors during vectorization |
+| Thread Limiting | OpenMP C++ and MKL strict internal thread capping injected at worker spawn to prevent OS starvation locks |
 
 ---
 
@@ -321,27 +321,49 @@ Recommendations:
   🟢 Optional: Add "cicd" to Skills Section
 ```
 
-### Console Logging (Training Pipeline)
+### Console Logging (Production Training Benchmark: 419,897 Jobs)
 
+```text
+[2026-02-23 19:15:28] ════════════════════════════════════════════════════════════
+[2026-02-23 19:15:28]   TRAINING PIPELINE START
+[2026-02-23 19:15:28] ════════════════════════════════════════════════════════════
+[2026-02-23 19:15:28] 💾 Memory [pipeline start]: 0.4 GB / 30 GB
+[2026-02-23 19:15:42] ── Stage 1/7: Data Ingestion ──
+[2026-02-23 19:15:42] [OK] Loaded 419,897 unique jobs in 14.5s
+[2026-02-23 19:15:42] ── Stage 2/7: Text Processing ──
+[2026-02-23 19:15:42] 🧠 Text Processing — Stage 1/3: Clean + Synonyms (27 workers, chunk=2000)
+...
+[2026-02-23 19:27:56] [OK] Text processing complete in 733.3s
+[2026-02-23 19:27:56] ── Stage 4/7: TF-IDF Vectorisation ──
+[2026-02-23 19:31:14] [OK] TF-IDF fitted: 419,897 docs x 10,000 features in 164.7s
+[2026-02-23 19:31:29] ════════════════════════════════════════════════════════════
+[2026-02-23 19:31:29]   TRAINING PIPELINE COMPLETE
+[2026-02-23 19:31:29] ════════════════════════════════════════════════════════════
+[2026-02-23 19:31:29]    Total time: 961.4s (16.02 minutes)
+[2026-02-23 19:31:29]    Jobs processed: 419,897
+[2026-02-23 19:31:29]    Unique skills: 171
+[2026-02-23 19:31:29]    TF-IDF features: 10,000
+[2026-02-23 19:31:29] 💾 Memory [pipeline end]: 6.3 GB / 30 GB
 ```
-[2026-02-22 09:30:01] ════════════════════════════════════════════════════════════
-[2026-02-22 09:30:01]   TRAINING PIPELINE START
-[2026-02-22 09:30:01] ════════════════════════════════════════════════════════════
-[2026-02-22 09:30:01] 💾 Memory [pipeline start]: 2.1 GB / 30 GB
-[2026-02-22 09:30:01] ── Stage 1/7: Data Ingestion ──
-[2026-02-22 09:30:02] ✅ Loaded 45,231 unique jobs in 0.8s
-[2026-02-22 09:30:02] ── Stage 2/7: Text Processing ──
-[2026-02-22 09:30:02] 🧠 Text Processing — Stage 1/3: Clean + Synonyms (18 workers)
-[2026-02-22 09:30:02] ┌── Clean + Synonyms ── starting (45,231 items)
-[2026-02-22 09:30:04] │  [██████████████████░░░░░░░░░░░░] 60.0% (27,138/45,231) | 1.8s | 15,076 items/s | RAM: 4.2 GB
-[2026-02-22 09:30:05] └── Clean + Synonyms ── done in 3.1s (45,231 items) | RAM: 4.8 GB
-[2026-02-22 09:30:15] ── Stage 4/7: TF-IDF Vectorisation ──
-[2026-02-22 09:30:16] ✅ TF-IDF fitted: 45,231 docs × 10,000 features in 1.2s
-[2026-02-22 09:30:21] ════════════════════════════════════════════════════════════
-[2026-02-22 09:30:21]   TRAINING PIPELINE COMPLETE
-[2026-02-22 09:30:21] ════════════════════════════════════════════════════════════
-[2026-02-22 09:30:21]    Total time: 19.8s
-[2026-02-22 09:30:21]    Jobs processed: 45,231
-[2026-02-22 09:30:21]    TF-IDF features: 10,000
-[2026-02-22 09:30:21] 💾 Memory [pipeline end]: 12.1 GB / 30 GB
+
+### Console Logging (Production ATS Engine Quick Match Benchmark)
+
+```text
+[2026-02-23 20:18:27] ════════════════════════════════════════════════════════════
+[2026-02-23 20:18:27]   QUICK MATCH ANALYSIS
+[2026-02-23 20:18:27] ════════════════════════════════════════════════════════════
+[2026-02-23 20:18:27] 💾 Memory [quick-match start]: 3.5 GB / 30 GB
+[2026-02-23 20:18:27] 📝 Processing resume and JD text...
+[2026-02-23 20:18:27] 🔍 Extracting skills...
+[2026-02-23 20:18:27]   Resume skills: 13 | JD skills: 37
+[2026-02-23 20:18:27] 📋 Running ATS simulation...
+[2026-02-23 20:18:27] 🎯 Computing composite score...
+[2026-02-23 20:18:28] ════════════════════════════════════════════════════════════
+[2026-02-23 20:18:28]   QUICK MATCH COMPLETE
+[2026-02-23 20:18:28] ════════════════════════════════════════════════════════════
+[2026-02-23 20:18:28]    Overall score: 25.7 / 100
+[2026-02-23 20:18:28]    Matched skills: 8
+[2026-02-23 20:18:28]    Missing skills: 29
+[2026-02-23 20:18:28]    Time: 0.91s
+[2026-02-23 20:18:28] 💾 Memory [quick-match end]: 3.5 GB / 30 GB
 ```

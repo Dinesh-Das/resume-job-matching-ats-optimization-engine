@@ -49,7 +49,6 @@ from model_manager import save_model, load_model, is_model_trained
 from logging_config import setup_logging, log_banner, log_stage
 from resource_monitor import check_memory, log_memory, get_memory_usage_gb
 
-setup_logging()
 logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────
@@ -58,6 +57,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
 app = FastAPI(title="ATS Optimization Engine API")
+
+@app.on_event("startup")
+async def startup_event():
+    setup_logging()
+    logger.info("Server application started and logging initialized.")
 
 app.add_middleware(
     CORSMiddleware,

@@ -53,7 +53,8 @@ def extract_skills_from_jobs(job_texts: list, skill_dict: list = None) -> list:
     Extract skills from each job text using ProcessPoolExecutor for true multicore speed.
     Returns a list of lists (one per job).
     """
-    from concurrent.futures import ProcessPoolExecutor
+    # Use loky to dynamically chunk and memmap string buffers to prevent OS IPC Pipe deadlocks on Windows.
+    from joblib.externals.loky import ProcessPoolExecutor
     from logging_config import ProgressLogger
     from resource_monitor import check_memory
 

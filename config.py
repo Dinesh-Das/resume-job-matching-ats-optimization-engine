@@ -20,7 +20,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # ──────────────────────────────────────────────
 import multiprocessing
 CPU_COUNT = multiprocessing.cpu_count()                # e.g. 20
-MAX_WORKERS = max(1, min(16, CPU_COUNT - 2))           # e.g. 18
+MAX_WORKERS = max(1, CPU_COUNT - 1)                    # Push to hardware limit (leave 1 core for OS)
 CHUNK_SIZE = 2000                                       # for ProcessPoolExecutor.map
 MAX_RAM_GB = 30                                         # hard RAM limit
 

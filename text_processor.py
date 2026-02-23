@@ -18,14 +18,22 @@ def _get_nlp():
     global _nlp
     if _nlp is None:
         try:
+            import os
+            
+            # ── CRITICAL FIX ──
+            # Force CPU for spaCy and strictly limit internal C++ thread pools.
+            # On Windows, loky 'spawn' workers do not inherit runtime OS variables.
+            # These must be set before importing spacy inside the child process to prevent 
+            # 8 workers * 20 threads = 160 threads fighting for the CPU and timing out.
+            os.environ["OMP_NUM_THREADS"] = "1"
+            os.environ["OPENBLAS_NUM_THREADS"] = "1"
+            os.environ["MKL_NUM_THREADS"] = "1"
+            os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+            os.environ["NUMEXPR_NUM_THREADS"] = "1"
+            
             import spacy
-            try:
-                logger.info("Attempting to enable GPU for spaCy...")
-                spacy.require_gpu()
-                logger.info("GPU enabled successfully.")
-            except Exception as e:
-                logger.warning(f"Could not enable GPU for spaCy: {e}. Falling back to CPU.")
-
+            spacy.require_cpu()
+            
             try:
                 _nlp = spacy.load("en_core_web_sm", disable=["parser", "ner", "textcat", "custom"])
                 # Increase max_length for very long job texts
@@ -148,13 +156,35 @@ def _pre_process_worker(text: str) -> str:
     """Helper worker for multiprocessing text cleanup."""
     return apply_synonyms(clean_text(text))
 
+
 def remove_domain_stopwords_worker(text: str) -> str:
     """Helper worker for multiprocessing stopword removal."""
     return remove_domain_stopwords(text)
 
+def _lemmatize_batch_worker(texts_group: list) -> list:
+    """
+    Worker for multiprocessing spaCy Lemmatization.
+    Initializes spaCy inside the child process and processes a batch.
+    """
+    nlp = _get_nlp()
+    if nlp == "fallback":
+        # simple lowercase tokenization
+        results = []
+        for text in texts_group:
+            results.append(lemmatize(text))
+        return results
+    
+    # Using spaCy's optimized pipe inside the worker
+    batch_lemmatized = []
+    for doc in nlp.pipe(texts_group, batch_size=200):
+        tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct and len(token.text) > 1]
+        batch_lemmatized.append(" ".join(tokens))
+    return batch_lemmatized
+
 def process_series(series) -> list:
-    """Process a pandas Series of text using ProcessPoolExecutor and spaCy's optimized nlp.pipe loop."""
-    from concurrent.futures import ProcessPoolExecutor
+    """Process a pandas Series of text using loky ProcessPoolExecutor and spaCy's optimized nlp.pipe loop."""
+    # Use loky to dynamically chunk and memmap string buffers to prevent OS IPC Pipe deadlocks on Windows.
+    from joblib.externals.loky import ProcessPoolExecutor
     from logging_config import ProgressLogger
     from resource_monitor import check_memory
 
@@ -176,35 +206,33 @@ def process_series(series) -> list:
 
     check_memory("after clean+synonyms")
 
-    # Stage 2: Lemmatization
+    # Stage 2: Lemmatization (multiprocess)
     nlp = _get_nlp()
-    if nlp == "fallback":
-        logger.info(f"🧠 Text Processing — Stage 2/3: Fallback Lemmatisation ({MAX_WORKERS} workers)")
-        progress = ProgressLogger("Lemmatisation", total, logger, report_every_pct=20)
-        with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            lemmatized = []
-            for i, result in enumerate(executor.map(lemmatize, pre_processed, chunksize=CHUNK_SIZE)):
-                lemmatized.append(result)
-                if (i + 1) % CHUNK_SIZE == 0 or i + 1 == total:
-                    progress.update(CHUNK_SIZE if (i + 1) % CHUNK_SIZE == 0 else (i + 1) % CHUNK_SIZE)
-        progress.finish()
-    else:
-        gpu_str = "GPU accelerated" if hasattr(nlp, 'prefer_gpu') else "CPU"
-        logger.info(f"🧠 Text Processing — Stage 2/3: spaCy Lemmatisation ({gpu_str}, batch={CHUNK_SIZE})")
-        progress = ProgressLogger("spaCy Lemmatisation", total, logger, report_every_pct=20)
-        lemmatized = []
-        batch_count = 0
-        for doc in nlp.pipe(pre_processed, batch_size=CHUNK_SIZE):
-            tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct and len(token.text) > 1]
-            lemmatized.append(" ".join(tokens))
-            batch_count += 1
-            if batch_count % CHUNK_SIZE == 0:
-                progress.update(CHUNK_SIZE)
-        # Report remaining
-        remaining = batch_count % CHUNK_SIZE
-        if remaining:
-            progress.update(remaining)
-        progress.finish()
+    gpu_str = "GPU accelerated" if hasattr(nlp, 'prefer_gpu') else "CPU/Fallback"
+    
+    # Use maximum available OS cores now that Windows OpenMP scaling limits are safely injected
+    spacy_workers = MAX_WORKERS
+    
+    import os
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    
+    logger.info(f"🧠 Text Processing — Stage 2/3: spaCy Lemmatisation ({gpu_str}, {spacy_workers} workers)")
+    logger.info(f"   ⏳ Note: Deep NLP analysis on {total:,} items is a heavy operation and will take several minutes to complete.")
+    progress = ProgressLogger("spaCy Lemmatisation", total, logger, report_every_pct=2)
+    
+    # Chunk the pre_processed array into smaller, safer batches for IPC
+    batch_size = max(500, min(1000, total // (spacy_workers * 4)))
+    batches = [pre_processed[i:i + batch_size] for i in range(0, total, batch_size)]
+    lemmatized = []
+    
+    with ProcessPoolExecutor(max_workers=spacy_workers) as executor:
+        for result_batch in executor.map(_lemmatize_batch_worker, batches):
+            lemmatized.extend(result_batch)
+            progress.update(len(result_batch))
+    
+    progress.finish()
 
     check_memory("after lemmatisation")
 
