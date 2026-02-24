@@ -265,6 +265,8 @@ No parameters. Requires `data/jobs.json` to exist.
 - Python 3.11+
 - Node.js 18+
 - NVIDIA GPU with CUDA (optional, for GPU acceleration)
+- **Tesseract-OCR**: Required for fallback image-based resume extraction. (Install via `apt-get install tesseract-ocr` or Windows installer)
+- **Poppler**: Required for PDF rendering to images. (Install via `apt-get install poppler-utils` or Windows binaries)
 
 ### Installation
 

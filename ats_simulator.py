@@ -73,10 +73,21 @@ def detect_formatting_issues(resume_text: str, raw_bytes: bytes = None) -> list:
 
     # 3. Section heading clarity
     found_headings = []
+    
+    # Track unique headings to avoid duplicates like "Experience" on multiple pages
+    unique_headings = set()
     for line in lines:
-        clean_line = line.strip().lower().rstrip(":")
-        if clean_line in STANDARD_HEADINGS:
-            found_headings.append(clean_line)
+        clean_line = line.strip().lower()
+        # Only check reasonably short lines that might be headings
+        if len(clean_line) > 0 and len(clean_line) < 60:
+            for heading in STANDARD_HEADINGS:
+                # If the line starts with the heading (or equals it)
+                if clean_line.startswith(heading) or heading in clean_line:
+                    unique_headings.add(heading)
+                    break
+                    
+    found_headings = list(unique_headings)
+
     if len(found_headings) < 3:
         issues.append({
             "issue": "Missing standard section headings",
@@ -135,8 +146,14 @@ def detect_formatting_issues(resume_text: str, raw_bytes: bytes = None) -> list:
         })
 
     # 8. Email and contact info presence
-    has_email = bool(re.search(r"\S+@\S+\.\S+", text))
-    has_phone = bool(re.search(r"[\+]?[\d\-\(\)\s]{7,15}", text))
+    # Robust email regex handling common extraction artifacts
+    has_email = bool(re.search(r"[a-zA-Z0-9\.\-+_]+@[a-zA-Z0-9\.\-+_]+\.[a-zA-Z]+", text))
+    
+    # Robust phone regex (10-15 digits with optional spaces/dashes/parens in between, starting/ending with digit or +)
+    phone_matches = re.findall(r"[\+\(]?\d[\d\s\-\(\)]{8,20}\d", text)
+    # Validate that the match actually contains at least 9 numbers
+    has_phone = any(sum(c.isdigit() for c in match) >= 9 for match in phone_matches)
+
     if not has_email:
         issues.append({
             "issue": "No email address detected",
@@ -215,41 +232,211 @@ def compute_ats_parseability_score(resume_text: str, raw_bytes: bytes = None) ->
     }
 
 
-def segment_resume_sections(resume_text: str) -> dict:
+def segment_resume_sections(resume_text: str, fuzzy_threshold: int = 85) -> dict:
     """
-    Basic rule-based resume section segmentation.
-    Identifies standard sections by heading detection.
+    Intelligent resume section segmentation using weighted heading detection.
 
-    Returns dict mapping section_name -> section_text
+    Scoring: fuzzy match (40%) + typography cues (30%) + spacing heuristics (30%).
+    Falls back to semantic content classification for ambiguous headings.
+
+    Parameters
+    ----------
+    resume_text : str
+        Cleaned resume text.
+    fuzzy_threshold : int
+        Minimum fuzzy score (default 85, can be relaxed to 75 for reprocessing).
+
+    Returns
+    -------
+    dict
+        Maps section_name -> section_text. Also stores section metadata
+        in the '_metadata' key: {section_name: {start_line, end_line,
+        heading_text, heading_confidence, section_type}}.
     """
+    from thefuzz import fuzz
+    from config import STANDARD_HEADINGS as CONFIG_HEADINGS
+
     lines = resume_text.split("\n")
     sections = {}
+    section_metadata = {}
     current_section = "header"
     current_lines = []
+    current_start_line = 0
 
-    heading_pattern = re.compile(
-        r"^\s*("
-        + "|".join(re.escape(h) for h in sorted(STANDARD_HEADINGS, key=len, reverse=True))
-        + r")\s*:?\s*$",
+    # ── Semantic content keywords for classification ──
+    SECTION_CONTENT_SIGNALS = {
+        "experience": [
+            "responsible for", "managed", "developed", "implemented",
+            "led", "designed", "collaborated", "built", "created",
+            "present", "current",
+        ],
+        "education": [
+            "university", "college", "institute", "bachelor", "master",
+            "ph.d", "diploma", "degree", "gpa", "graduated",
+        ],
+        "skills": [
+            "proficient", "experienced in", "familiar with", "expertise",
+            "technologies", "tools", "frameworks", "languages",
+        ],
+        "certifications": [
+            "certified", "certification", "certificate", "credential",
+            "aws certified", "pmp", "ccna",
+        ],
+    }
+
+    # Date range pattern for detecting experience-like content
+    date_range_re = re.compile(
+        r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{2,4}\s*[-–—]\s*'
+        r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{2,4}|\d{4}\s*[-–—]\s*(?:\d{4}|present|current|now)\b',
         re.IGNORECASE
     )
 
-    for line in lines:
-        match = heading_pattern.match(line.strip())
-        if match:
+    def _compute_heading_score(line: str, line_idx: int) -> tuple:
+        """
+        Compute composite heading score for a line.
+        Returns (best_heading_match, composite_score, components).
+        """
+        cleaned = line.strip()
+        if not cleaned or len(cleaned) > 60:
+            return None, 0.0, {}
+
+        cleaned_lower = cleaned.lower()
+        # Remove trailing colon/dash
+        if cleaned_lower.endswith(":") or cleaned_lower.endswith("-"):
+            cleaned_lower = cleaned_lower[:-1].strip()
+
+        # ── Typography Score (0-100) ──
+        typography_score = 0
+        alpha_chars = [c for c in cleaned if c.isalpha()]
+        word_count = len(cleaned.split())
+
+        # ALL CAPS = strong signal
+        if len(alpha_chars) >= 3 and all(c.isupper() for c in alpha_chars):
+            typography_score = 90
+
+        # Title Case with few words = moderate signal
+        elif cleaned.istitle() and word_count <= 4:
+            typography_score = 60
+
+        # Short line (1-5 words) = some signal
+        elif word_count <= 5:
+            typography_score = 40
+
+        # ── Spacing Score (0-100) ──
+        spacing_score = 0
+
+        # Preceded by blank line = strong signal
+        if line_idx > 0 and not lines[line_idx - 1].strip():
+            spacing_score += 50
+
+        # Followed by non-empty line (content follows heading)
+        if line_idx < len(lines) - 1 and lines[line_idx + 1].strip():
+            spacing_score += 30
+
+        # First few lines = header likely
+        if line_idx <= 3:
+            spacing_score += 20
+
+        spacing_score = min(100, spacing_score)
+
+        # ── Fuzzy Match Score (0-100) ──
+        best_match = None
+        best_fuzzy = 0
+
+        for heading in CONFIG_HEADINGS:
+            score = fuzz.token_sort_ratio(cleaned_lower, heading.lower())
+            if score > best_fuzzy:
+                best_fuzzy = score
+                best_match = heading
+
+        # ── Composite Score ──
+        # Weights: fuzzy 40%, typography 30%, spacing 30%
+        composite = (best_fuzzy * 0.40) + (typography_score * 0.30) + (spacing_score * 0.30)
+
+        if best_fuzzy >= fuzzy_threshold:
+            return best_match, composite, {
+                "fuzzy": best_fuzzy, "typography": typography_score,
+                "spacing": spacing_score, "composite": composite
+            }
+
+        # Ambiguous zone (60-84): use semantic fallback
+        if best_fuzzy >= 60 and composite >= 55:
+            return best_match, composite, {
+                "fuzzy": best_fuzzy, "typography": typography_score,
+                "spacing": spacing_score, "composite": composite,
+                "semantic_fallback": True
+            }
+
+        return None, composite, {}
+
+    def _classify_content_semantically(text_block: str) -> str:
+        """Classify a text block into a section type by content keywords."""
+        text_lower = text_block.lower()
+        best_section = None
+        best_count = 0
+        for section, keywords in SECTION_CONTENT_SIGNALS.items():
+            count = sum(1 for kw in keywords if kw in text_lower)
+            if count > best_count:
+                best_count = count
+                best_section = section
+        # Also check for date ranges (strong experience signal)
+        if date_range_re.search(text_block):
+            if best_section != "education":
+                best_section = "experience"
+        return best_section
+
+    # ── Main segmentation loop ──
+    for i, line in enumerate(lines):
+        matched_heading, score, components = _compute_heading_score(line, i)
+
+        if matched_heading and score >= 50:
             # Save previous section
             if current_lines:
-                sections[current_section] = "\n".join(current_lines).strip()
-            current_section = match.group(1).lower().strip()
+                section_text = "\n".join(current_lines).strip()
+                sections[current_section] = section_text
+                section_metadata[current_section] = {
+                    "start_line": current_start_line,
+                    "end_line": i - 1,
+                    "heading_text": lines[current_start_line].strip() if current_start_line < len(lines) else "",
+                    "heading_confidence": round(score / 100.0, 2),
+                    "section_type": current_section,
+                }
+
+            current_section = matched_heading.lower().strip()
             current_lines = []
+            current_start_line = i + 1
         else:
             current_lines.append(line)
 
     # Save last section
     if current_lines:
-        sections[current_section] = "\n".join(current_lines).strip()
+        section_text = "\n".join(current_lines).strip()
+        sections[current_section] = section_text
+        section_metadata[current_section] = {
+            "start_line": current_start_line,
+            "end_line": len(lines) - 1,
+            "heading_text": "",
+            "heading_confidence": 0.5,
+            "section_type": current_section,
+        }
 
-    logger.info(f"Section segmentation: {len(sections)} sections found ({', '.join(sections.keys())})")
+    # ── Post-process: detect missing headings via content classification ──
+    if "experience" not in sections and "work experience" not in sections:
+        # Check if header or any unnamed section contains experience content
+        for section_name, text in list(sections.items()):
+            if section_name == "header" and len(text) > 200:
+                inferred = _classify_content_semantically(text)
+                if inferred == "experience":
+                    logger.info("Inferred 'experience' section from header content")
+                    sections["experience"] = text
+                    section_metadata["experience"] = section_metadata.get(section_name, {})
+                    section_metadata["experience"]["section_type"] = "experience (inferred)"
+
+    # Store metadata in a special key
+    sections["_metadata"] = section_metadata
+
+    section_names = [k for k in sections.keys() if k != "_metadata"]
+    logger.info(f"Section segmentation: {len(section_names)} sections found ({', '.join(section_names)})")
     return sections
 
 
@@ -422,6 +609,8 @@ def compute_section_weights(resume_text: str) -> dict:
     sections = segment_resume_sections(resume_text)
     weighted = {}
     for section_name, text in sections.items():
+        if section_name == "_metadata":
+            continue
         weight = SECTION_WEIGHTS.get(section_name, 0.4)
         weighted[section_name] = {
             "weight": weight,

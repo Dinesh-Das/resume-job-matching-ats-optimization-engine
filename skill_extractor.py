@@ -37,6 +37,9 @@ def extract_skills_from_text(text: str, skill_dict: list = None) -> list:
     if not text:
         return []
 
+    from text_processor import clean_text, apply_synonyms
+    text = apply_synonyms(clean_text(text))
+
     pattern = _get_skill_pattern(skill_dict)
     matches = pattern.findall(text)
     

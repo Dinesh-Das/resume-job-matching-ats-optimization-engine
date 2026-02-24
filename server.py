@@ -27,7 +27,7 @@ from config import (
     OUTPUT_DIR, JOBS_JSON_PATH, ORACLE_DEFAULTS,
 )
 from data_ingestion import ingest_jobs
-from resume_parser import parse_resume
+from resume_parser import parse_resume, parse_resume_text
 from text_processor import process, process_series
 from skill_extractor import (
     extract_skills_from_text, extract_skills_from_jobs,
@@ -225,40 +225,15 @@ async def upload_jobs(file: UploadFile = File(...)):
 
 @app.post("/api/upload-resume")
 async def upload_resume(file: UploadFile = File(...)):
-    """Parse an uploaded resume and return extracted text."""
-    try:
-        content = await file.read()
-        from io import BytesIO
-        text = parse_resume(BytesIO(content), filename=file.filename)
-        return {"status": "ok", "text": text, "length": len(text)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/upload-resume")
-async def upload_resume(file: UploadFile = File(...)):
     """Parse an uploaded resume/JD file (PDF, DOCX, TXT) into plain text."""
-    from resume_parser import parse_pdf, parse_docx, parse_txt
-    import io
-
     try:
-        ext = file.filename.lower().rsplit(".", 1)[-1] if "." in file.filename else ""
         content = await file.read()
-        buf = io.BytesIO(content)
-
-        if ext == "pdf":
-            text = parse_pdf(buf)
-        elif ext in ("docx", "doc"):
-            text = parse_docx(buf)
-        elif ext in ("txt", "text"):
-            text = parse_txt(buf)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
-
+        text = parse_resume_text(content, filename=file.filename)
+        
         if not text or not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file.")
 
-        logger.info(f"📄 Parsed uploaded file: {file.filename} ({len(text)} chars)")
+        logger.info(f"Parsed uploaded file: {file.filename} ({len(text)} chars)")
         return {"text": text, "filename": file.filename, "characters": len(text)}
 
     except HTTPException:
@@ -266,6 +241,65 @@ async def upload_resume(file: UploadFile = File(...)):
     except Exception as e:
         logger.exception(f"File parse error: {file.filename}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/parse-advanced")
+async def parse_advanced(file: UploadFile = File(...)):
+    """
+    Advanced Parse: Multi-stage fault-tolerant pipeline.
+    Extracts text, repairs layout, segments sections, extracts entities,
+    and returns a fully structured JSON payload with confidence scores,
+    traceability, and anomaly reporting.
+    """
+    try:
+        content = await file.read()
+
+        # 1. Full pipeline extraction (returns ParseResult with bounding boxes, anomalies, etc.)
+        parse_result = parse_resume(content, filename=file.filename)
+
+        cleaned_text = parse_result.cleaned_text or parse_result.raw_text
+        if not cleaned_text or not cleaned_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract text. Anomalies: {parse_result.anomalies}"
+            )
+
+        # 2. Build fully structured resume schema with validation & reprocessing
+        from entity_extractor import build_structured_resume
+        structured_data = build_structured_resume(
+            resume_text=cleaned_text,
+            raw_text=parse_result.raw_text,
+            metadata={
+                "extraction_method": parse_result.extraction_method,
+                "file_type": parse_result.file_type,
+                **parse_result.metadata,
+            },
+        )
+
+        # 3. ATS Parseability
+        from ats_simulator import compute_ats_parseability_score
+        ats_result = compute_ats_parseability_score(cleaned_text)
+        structured_data["ats_parseability"] = ats_result
+
+        # 4. Merge pipeline anomalies into metadata
+        structured_data.setdefault("metadata", {})
+        structured_data["metadata"]["extraction_anomalies"] = parse_result.anomalies
+        structured_data["metadata"]["file_type"] = parse_result.file_type
+        structured_data["metadata"]["extraction_method"] = parse_result.extraction_method
+        structured_data["metadata"]["page_count"] = len(parse_result.pages)
+
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "data": structured_data
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Advanced parse error: {file.filename}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # ── Pipeline ──────────────────────────────────
