@@ -11,16 +11,24 @@ from config import TFIDF_PARAMS, DOMAIN_STOP_WORDS
 logger = logging.getLogger(__name__)
 
 
-def build_vectorizer() -> TfidfVectorizer:
+def build_vectorizer(corpus_size: int = 0) -> TfidfVectorizer:
     """
     Create a TfidfVectorizer with project configuration.
+    Dynamically scale max_features down for massive datasets to save RAM.
     """
     # Combine sklearn's English stop words with our domain stop words
     stop_words = list(DOMAIN_STOP_WORDS)
+    
+    # Cap max features to prevent OOMs on massive >200K datasets
+    max_features = TFIDF_PARAMS["max_features"]
+    if corpus_size > 200000:
+        max_features = min(max_features, 4000)
+    elif corpus_size > 100000:
+        max_features = min(max_features, 6000)
 
     vectorizer = TfidfVectorizer(
         ngram_range=TFIDF_PARAMS["ngram_range"],
-        max_features=TFIDF_PARAMS["max_features"],
+        max_features=max_features,
         min_df=TFIDF_PARAMS["min_df"],
         max_df=TFIDF_PARAMS["max_df"],
         sublinear_tf=TFIDF_PARAMS["sublinear_tf"],
@@ -44,7 +52,7 @@ def fit_tfidf(corpus: list):
     vectorizer : TfidfVectorizer (fitted)
     tfidf_matrix : sparse matrix (n_jobs x n_features)
     """
-    vectorizer = build_vectorizer()
+    vectorizer = build_vectorizer(len(corpus))
     tfidf_matrix = vectorizer.fit_transform(corpus)
     feature_names = vectorizer.get_feature_names_out().tolist()
     logger.info(

@@ -21,9 +21,18 @@ export default function DataSource() {
     const fileInputRef = useRef(null)
     const resumeInputRef = useRef(null)
 
+    const [selectedRole, setSelectedRole] = useState('all')
+
+    const [roles, setRoles] = useState([
+        { id: 'all', label: 'All Roles (General)' } // Fallback until fetched
+    ])
+
     const fetchData = () => {
         fetch('/api/jobs-status').then(r => r.json()).then(setJobStatus).catch(() => { })
         fetch('/api/model-status').then(r => r.json()).then(setModelStatus).catch(() => { })
+        fetch('/api/job-roles').then(r => r.json()).then(data => {
+            if (data && data.roles) setRoles(data.roles)
+        }).catch(() => { })
     }
 
     useEffect(() => {
@@ -66,7 +75,9 @@ export default function DataSource() {
     const handleTrainModel = async () => {
         setTrainingRunning(true); setMessage(null)
         try {
-            const res = await fetch('/api/train-model', { method: 'POST' })
+            const form = new FormData()
+            form.append('role', selectedRole)
+            const res = await fetch('/api/train-model', { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setMessage({ type: 'success', text: `🚀 ${data.message} The engine is now ready to score resumes!` })
@@ -86,7 +97,7 @@ export default function DataSource() {
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setResumeText(data.text)
-            setMessage({ type: 'success', text: `✅ Resume parsed (${data.length} characters).` })
+            setMessage({ type: 'success', text: `✅ Resume parsed (${data.characters} characters).` })
         } catch (e) {
             setMessage({ type: 'error', text: `❌ ${e.message}` })
         }
@@ -102,6 +113,7 @@ export default function DataSource() {
         try {
             const form = new FormData()
             form.append('resume_text', resumeText)
+            form.append('role', selectedRole)
             const res = await fetch('/api/run-pipeline', { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
@@ -119,38 +131,67 @@ export default function DataSource() {
         if (file) handler(file)
     }
 
+    const isCurrentRoleTrained = modelStatus?.roles?.[selectedRole] || false
+
     return (
         <div className="page-container">
             <div className="page-header animate-in">
                 <h1>📤 Data Source</h1>
-                <p>Choose your data source, upload your resume, and run the analysis pipeline.</p>
+                <p>Choose your data source, select a job role, and run the analysis pipeline.</p>
             </div>
 
             {message && (
                 <div className={`alert alert-${message.type}`}>{message.text}</div>
             )}
 
-            {/* Cached Data & Model Status */}
-            {jobStatus?.exists && (
-                <div className="alert alert-info animate-in" style={{ animationDelay: '100ms', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                        📦 Cached dataset: <strong>{jobStatus.total_records}</strong> jobs available
-                        {jobStatus.fetched_at && <> · Last fetched: {jobStatus.fetched_at?.slice(0, 19)}</>}
-                        <br />
-                        🧠 Engine Status: <strong>{modelStatus?.trained ? 'Trained & Ready' : 'Untrained'}</strong>
+            {/* Role Selection & Model Status */}
+            <div className="glass-card animate-in" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+                <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: 1, minWidth: '300px' }}>
+                        <label className="form-label">🎯 Targeted Job Role</label>
+                        <select
+                            className="form-input"
+                            style={{ background: 'rgba(255,255,255,0.05)', color: 'white', cursor: 'pointer' }}
+                            value={selectedRole}
+                            onChange={(e) => setSelectedRole(e.target.value)}
+                        >
+                            {roles.map(r => (
+                                <option key={r.id} value={r.id} style={{ background: '#1c1c1c' }}>
+                                    {r.label} {modelStatus?.roles?.[r.id] ? '(Trained 🟢)' : '(Untrained ⚪)'}
+                                </option>
+                            ))}
+                        </select>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                            Select a specific role to use a specialized model. Training a role-specific model filters the job dataset for better accuracy.
+                        </p>
                     </div>
 
-                    {!modelStatus?.trained && (
-                        <button className="btn btn-primary" onClick={handleTrainModel} disabled={trainingRunning}>
-                            {trainingRunning ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Training...</> : '⚙️ Train Engine'}
+                    <div style={{ flex: '0 0 auto', textAlign: 'right' }}>
+                        <div style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>
+                            Engine Status: <strong>{isCurrentRoleTrained ? 'Ready for scoring' : 'Needs Training'}</strong>
+                        </div>
+                        <button
+                            className={`btn ${isCurrentRoleTrained ? 'btn-secondary' : 'btn-primary'}`}
+                            onClick={handleTrainModel}
+                            disabled={trainingRunning || !jobStatus?.exists}
+                        >
+                            {trainingRunning ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Training...</> : `⚙️ Train ${selectedRole === 'all' ? 'General' : 'Specialized'} Engine`}
                         </button>
-                    )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Cached Data Info */}
+            {jobStatus?.exists && (
+                <div className="alert alert-info animate-in" style={{ animationDelay: '100ms', marginBottom: '1.5rem' }}>
+                    📦 Cached dataset: <strong>{jobStatus.total_records}</strong> jobs available
+                    {jobStatus.fetched_at && <> · Last fetched: {jobStatus.fetched_at?.slice(0, 19).replace('T', ' ')}</>}
                 </div>
             )}
 
             {/* Source Selection */}
-            {!mode && (
-                <div className="grid-2 animate-in" style={{ marginTop: '2rem', animationDelay: '200ms' }}>
+            {!mode && !jobStatus?.exists && (
+                <div className="grid-2 animate-in" style={{ marginTop: '1rem', animationDelay: '200ms' }}>
                     <div className="source-card" onClick={() => setMode('db')}>
                         <div className="source-icon">🗄️</div>
                         <h2>Use Database</h2>
@@ -168,7 +209,7 @@ export default function DataSource() {
 
             {/* DB Form */}
             {mode === 'db' && (
-                <div className="glass-card animate-in" style={{ marginTop: '1.5rem' }}>
+                <div className="glass-card animate-in" style={{ marginTop: '1rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                         <h2>🗄️ Oracle Database Connection</h2>
                         <button className="btn btn-sm btn-secondary" onClick={() => setMode(null)}>← Back</button>
@@ -194,7 +235,7 @@ export default function DataSource() {
 
             {/* Upload */}
             {mode === 'upload' && (
-                <div className="glass-card animate-in" style={{ marginTop: '1.5rem' }}>
+                <div className="glass-card animate-in" style={{ marginTop: '1rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                         <h2>📁 Upload Job Data</h2>
                         <button className="btn btn-sm btn-secondary" onClick={() => setMode(null)}>← Back</button>
@@ -215,7 +256,7 @@ export default function DataSource() {
             )}
 
             {/* Resume Upload — always visible after model is trained */}
-            {(modelStatus?.trained) && (
+            {(isCurrentRoleTrained) && (
                 <div className="glass-card animate-in" style={{ marginTop: '1.5rem', animationDelay: '100ms' }}>
                     <h2 style={{ marginBottom: '1rem' }}>📄 Upload Resume</h2>
                     <input ref={resumeInputRef} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }}
@@ -236,7 +277,7 @@ export default function DataSource() {
             )}
 
             {/* Run Pipeline */}
-            {modelStatus?.trained && resumeText && (
+            {isCurrentRoleTrained && resumeText && (
                 <div style={{ textAlign: 'center', marginTop: '2rem' }} className="animate-in">
                     <button className="btn btn-primary btn-lg" onClick={runPipeline} disabled={pipelineRunning}>
                         {pipelineRunning ? (
@@ -244,7 +285,7 @@ export default function DataSource() {
                         ) : '🚀 Run Analysis Pipeline'}
                     </button>
                     <p style={{ color: 'var(--text-muted)', marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                        This will process the resume instantly against the pre-trained engine.
+                        Matching against the <strong>{roles.find(r => r.id === selectedRole)?.label}</strong> model.
                     </p>
                 </div>
             )}

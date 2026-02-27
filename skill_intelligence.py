@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import logging
 from collections import Counter
-from itertools import combinations
 from sklearn.cluster import MiniBatchKMeans
 from config import DEFAULT_N_CLUSTERS
 
@@ -107,14 +106,29 @@ def cluster_roles(tfidf_matrix, job_df: pd.DataFrame,
     if n_clusters is None:
         n_clusters = min(DEFAULT_N_CLUSTERS, tfidf_matrix.shape[0])
 
+    # KMeans operations on 100K+ TF-IDF vectors requires dense array conversion which OOMs
+    # Sample down to a maximum of 20,000 jobs for clustering to conserve memory
+    MAX_CLUSTER_SAMPLES = 20000
+    if tfidf_matrix.shape[0] > MAX_CLUSTER_SAMPLES:
+        logger.info(f"Subsampling {MAX_CLUSTER_SAMPLES} jobs built for clustering to conserve memory.")
+        # We need both the matrix and the DF subsampled consistently
+        sample_indices = np.random.choice(tfidf_matrix.shape[0], MAX_CLUSTER_SAMPLES, replace=False)
+        tfidf_cluster_input = tfidf_matrix[sample_indices]
+        job_df_cluster_input = job_df.iloc[sample_indices].copy()
+    else:
+        tfidf_cluster_input = tfidf_matrix
+        job_df_cluster_input = job_df.copy()
+
     kmeans = MiniBatchKMeans(
         n_clusters=n_clusters,
         random_state=42,
-        batch_size=min(1024, tfidf_matrix.shape[0]),
+        batch_size=min(1024, tfidf_cluster_input.shape[0]),
         n_init=3,
     )
-    labels = kmeans.fit_predict(tfidf_matrix)
-    result = job_df.copy()
+    # Fit and predict only on the subsampled data to prevent dense array memory spikes
+    labels = kmeans.fit_predict(tfidf_cluster_input)
+    
+    result = job_df_cluster_input
     result["cluster"] = labels
     logger.info(f"Clustered {len(result)} jobs into {n_clusters} groups")
     return result

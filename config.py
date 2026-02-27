@@ -229,6 +229,60 @@ SKILL_TAXONOMY = {
 }
 
 # ──────────────────────────────────────────────
+# Job Roles Taxonomy
+# ──────────────────────────────────────────────
+JOB_ROLES = {
+    "software_engineer": {
+        "label": "Software Engineer (Java, React, Fullstack)",
+        "pattern": r"java|frontend|front\s*end|backend|back\s*end|fullstack|full\s*stack|software\s*engineer|developer"
+    },
+    "devops_engineer": {
+        "label": "DevOps & Infrastructure Engineer",
+        "pattern": r"devops|sre|infrastructure|cloud\s*engineer|systems\s*engineer|platform\s*engineer"
+    },
+    "data_engineer": {
+        "label": "Data Engineer",
+        "pattern": r"data\s*engineer|etl\s*developer|big\s*data|data\s*pipeline"
+    },
+    "data_scientist": {
+        "label": "Data Scientist",
+        "pattern": r"data\s*scientist|machine\s*learning\s*engineer|ml\s*engineer|ai\s*researcher"
+    },
+    "data_analyst": {
+        "label": "Data Analyst",
+        "pattern": r"data\s*analyst|business\s*intelligence|bi\s*analyst|reporting\s*analyst"
+    },
+    "cloud_engineer": {
+        "label": "Cloud Engineer",
+        "pattern": r"cloud\s*architect|aws\s*engineer|azure\s*engineer|gcp\s*engineer"
+    },
+    "qa_engineer": {
+        "label": "QA / Test Automation Engineer",
+        "pattern": r"qa\s*engineer|quality\s*assurance|test\s*automation|sdet"
+    },
+    "security_engineer": {
+        "label": "Security Engineer",
+        "pattern": r"security\s*engineer|cybersecurity|infosec|penetration\s*tester|soc\s*analyst"
+    },
+    "mobile_developer": {
+        "label": "Mobile App Developer (iOS, Android)",
+        "pattern": r"mobile\s*developer|ios\s*developer|android\s*developer|react\s*native|flutter"
+    },
+    "ui_ux_designer": {
+        "label": "UI/UX Designer",
+        "pattern": r"ui\s*designer|ux\s*designer|product\s*designer|user\s*experience|user\s*interface"
+    },
+    "gen_ai_engineer": {
+        "label": "Generative AI Engineer",
+        "pattern": r"gen\s*ai|generative\s*ai|llm\s*engineer|prompt\s*engineer"
+    },
+    "ai_ml_engineer": {
+        "label": "AI/ML Engineer",
+        "pattern": r"ai\s*engineer|ml\s*ops|machine\s*learning\s*engineer|artificial\s*intelligence"
+    }
+}
+
+# ──────────────────────────────────────────────
 # Title Taxonomy — title pattern → seniority (0-5)
 # ──────────────────────────────────────────────
 TITLE_TAXONOMY = {

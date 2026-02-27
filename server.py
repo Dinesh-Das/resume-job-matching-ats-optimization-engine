@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import (
-    OUTPUT_DIR, JOBS_JSON_PATH, ORACLE_DEFAULTS,
+    OUTPUT_DIR, JOBS_JSON_PATH, ORACLE_DEFAULTS, JOB_ROLES
 )
 from data_ingestion import ingest_jobs
 from resume_parser import parse_resume, parse_resume_text
@@ -305,22 +305,51 @@ async def parse_advanced(file: UploadFile = File(...)):
 # ── Pipeline ──────────────────────────────────
 
 @app.post("/api/train-model")
-def train_model():
-    """Process all jobs, vectorize, and save the model to disk."""
+def train_model(role: Optional[str] = Form(None)):
+    """Process jobs (optionally filtered by role), vectorize, and save the model to disk."""
     import time as _time
     if not os.path.exists(JOBS_JSON_PATH):
         raise HTTPException(status_code=400, detail="No job data found. Fetch from DB or upload first.")
 
     try:
         pipeline_start = _time.time()
-        log_banner(logger, "TRAINING PIPELINE START")
+        log_banner(logger, f"TRAINING PIPELINE START {'[' + role.upper() + ']' if role else '[ALL]'}")
         log_memory(logger, "pipeline start")
 
         # 1. Load jobs
         log_stage(logger, 1, 7, "Data Ingestion")
         t0 = _time.time()
         job_df = ingest_jobs(JOBS_JSON_PATH)
-        logger.info(f"[OK] Loaded {len(job_df):,} unique jobs in {_time.time()-t0:.1f}s")
+        logger.info(f"[OK] Loaded {len(job_df):,} unique jobs")
+        
+        # 1.1 Filter by role if specified
+        if role and role.lower() != "all":
+            role_key = role.lower()
+            if role_key not in JOB_ROLES:
+                # Try to map old UI role names for backward compatibility if needed, or just reject
+                legacy_mapping = {
+                    "software_developer": "software_engineer",
+                    "data": "data_scientist" # loose map
+                }
+                if role_key in legacy_mapping:
+                    role_key = legacy_mapping[role_key]
+
+            if role_key not in JOB_ROLES:
+                raise HTTPException(status_code=400, detail=f"Invalid role: {role}. Must be a supported job role.")
+            
+            logger.info(f"Filtering jobs for role: {role_key}")
+            pattern = JOB_ROLES[role_key]["pattern"]
+
+            job_df = job_df[
+                job_df["combined_text"].str.contains(pattern, case=False, regex=True) |
+                job_df["title"].str.contains(pattern, case=False, regex=True)
+            ].copy()
+            logger.info(f"Filtered to {len(job_df):,} jobs for {role_key}")
+            
+            if len(job_df) == 0:
+                raise HTTPException(status_code=400, detail=f"No jobs found matching role: {role_key}")
+
+        logger.info(f"[OK] Final training set: {len(job_df):,} jobs in {_time.time()-t0:.1f}s")
         check_memory("after ingestion")
 
         # 2. Process job texts
@@ -383,10 +412,10 @@ def train_model():
             "industry_top_skills": importance_df["skill"].tolist() if not importance_df.empty else []
         }
 
-        success = save_model(model_data)
+        success = save_model(model_data, role=role)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save model to disk.")
-        logger.info(f"[OK] Model saved in {_time.time()-t0:.1f}s")
+        logger.info(f"[OK] Model ({role or 'all'}) saved in {_time.time()-t0:.1f}s")
 
         # Final summary
         total_time = _time.time() - pipeline_start
@@ -407,10 +436,30 @@ def train_model():
         raise HTTPException(status_code=500, detail=str(e))
         
 
+@app.get("/api/job-roles")
+async def get_job_roles():
+    """Return the list of available job roles for training/scoring from configuration."""
+    roles_list = [{"id": "all", "label": "All Roles (General)"}]
+    for role_id, data in JOB_ROLES.items():
+        roles_list.append({"id": role_id, "label": data["label"]})
+    return {"roles": roles_list}
+
+
 @app.get("/api/model-status")
 async def model_status():
-    """Check if the NLP model is trained and ready."""
-    return {"trained": is_model_trained()}
+    """Check if the NLP model is trained for various roles."""
+    roles = ["all"] + list(JOB_ROLES.keys())
+    status = {r: is_model_trained(r) for r in roles}
+    
+    # Also include the legacy names in case older UI tries to check them
+    status["software_developer"] = is_model_trained("software_engineer")
+    status["data"] = is_model_trained("data_scientist")
+    status["devops"] = is_model_trained("devops_engineer")
+    
+    return {
+        "trained": any(status.values()),
+        "roles": status
+    }
 
 
 # ── Quick Match (1:1 JD vs Resume) ───────────
@@ -546,20 +595,21 @@ async def quick_match(
 
 
 @app.post("/api/run-pipeline")
-async def run_pipeline(resume_text: str = Form(...)):
+async def run_pipeline(resume_text: str = Form(...), role: Optional[str] = Form(None)):
     """Run real-time resume analysis against the pre-trained model."""
     import time as _time
-    if not is_model_trained():
-        raise HTTPException(status_code=400, detail="Model is not trained. Fetch data and train the engine first.")
+    if not is_model_trained(role):
+        role_label = role if role else "General"
+        raise HTTPException(status_code=400, detail=f"Model for '{role_label}' is not trained. Fetch data and train the engine first.")
 
     try:
         t_start = _time.time()
-        log_banner(logger, "RESUME ANALYSIS PIPELINE")
+        log_banner(logger, f"RESUME ANALYSIS PIPELINE {'[' + (role or 'ALL').upper() + ']'}")
         log_memory(logger, "analysis start")
 
         # Load the pre-trained data structures
-        logger.info("[LOAD] Loading pre-trained model...")
-        model = load_model()
+        logger.info(f"[LOAD] Loading pre-trained model ({role or 'all'})...")
+        model = load_model(role)
         if not model:
             raise HTTPException(status_code=500, detail="Error loading model from disk.")
 

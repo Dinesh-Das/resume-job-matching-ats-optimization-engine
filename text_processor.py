@@ -175,8 +175,12 @@ def _lemmatize_batch_worker(texts_group: list) -> list:
         return results
     
     # Using spaCy's optimized pipe inside the worker
+    # nlp.pipe takes an iterator and yields Docs
     batch_lemmatized = []
-    for doc in nlp.pipe(texts_group, batch_size=200):
+    
+    # We must operate on text objects carefully. We don't want to hold 400,000 document representations
+    # in memory at once. So we convert them back to strings immediately
+    for doc in nlp.pipe(texts_group, batch_size=50):
         tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct and len(token.text) > 1]
         batch_lemmatized.append(" ".join(tokens))
     return batch_lemmatized
@@ -211,7 +215,8 @@ def process_series(series) -> list:
     gpu_str = "GPU accelerated" if hasattr(nlp, 'prefer_gpu') else "CPU/Fallback"
     
     # Use maximum available OS cores now that Windows OpenMP scaling limits are safely injected
-    spacy_workers = MAX_WORKERS
+    # Limit max workers for spaCy to prevent memory leaks on massive datasets (>300K)
+    spacy_workers = min(10, MAX_WORKERS)
     
     import os
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -222,15 +227,26 @@ def process_series(series) -> list:
     logger.info(f"   ⏳ Note: Deep NLP analysis on {total:,} items is a heavy operation and will take several minutes to complete.")
     progress = ProgressLogger("spaCy Lemmatisation", total, logger, report_every_pct=2)
     
-    # Chunk the pre_processed array into smaller, safer batches for IPC
-    batch_size = max(500, min(1000, total // (spacy_workers * 4)))
-    batches = [pre_processed[i:i + batch_size] for i in range(0, total, batch_size)]
-    lemmatized = []
+    # We must not build a list of 419,000 items in memory just to map them.
+    # Yield batches lazily to the executor.
     
+    # A smaller batch size prevents any single worker from holding too much memory
+    # when returning the result array.
+    batch_size = 500
+    
+    def generate_batches():
+        for i in range(0, total, batch_size):
+            yield pre_processed[i:i + batch_size]
+            
+    # Avoid max_tasks_per_child. Reloading spaCy (1.2GB memory hit) over and over 
+    # causes compounding OOM spikes when 10 workers restart simultaneously.
+    lemmatized = []
     with ProcessPoolExecutor(max_workers=spacy_workers) as executor:
-        for result_batch in executor.map(_lemmatize_batch_worker, batches):
-            lemmatized.extend(result_batch)
-            progress.update(len(result_batch))
+        # Using executor.map with an iterator keeps the input queue small.
+        # We use a generator batches() to avoid loading everything into RAM at once.
+        for result_batch in executor.map(_lemmatize_batch_worker, generate_batches()):
+             lemmatized.extend(result_batch)
+             progress.update(len(result_batch))
     
     progress.finish()
 
