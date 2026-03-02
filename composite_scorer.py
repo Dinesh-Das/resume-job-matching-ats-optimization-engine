@@ -10,23 +10,24 @@ import logging
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from thefuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
 # ── Default component weights ─────────────────────
 DEFAULT_WEIGHTS = {
-    "keyword_similarity": 0.30,
-    "skill_coverage": 0.25,
-    "job_title_alignment": 0.15,
-    "experience_relevance": 0.15,
-    "ats_parseability": 0.15,
+    "keyword_similarity": 0.15,
+    "skill_coverage": 0.35,
+    "job_title_alignment": 0.10,
+    "experience_relevance": 0.30,
+    "ats_parseability": 0.10,
 }
 
 
 def compute_keyword_similarity(resume_text: str, jd_text: str) -> float:
     """
-    Compute TF-IDF cosine similarity between resume and JD.
-    Returns score 0-1.
+    Compute TF-IDF cosine similarity between resume and JD with a liberal boost
+    to account for text length disparities. Returns score 0-1.
     """
     if not resume_text or not jd_text:
         return 0.0
@@ -40,6 +41,9 @@ def compute_keyword_similarity(resume_text: str, jd_text: str) -> float:
         )
         matrix = vectorizer.fit_transform([resume_text, jd_text])
         sim = cosine_similarity(matrix[0:1], matrix[1:2]).flatten()[0]
+        
+        # Boost raw TF-IDF similarity since resume and JDs are structurally different
+        sim = sim * 1.5
         return float(np.clip(sim, 0, 1))
     except Exception as e:
         logger.warning(f"Keyword similarity computation error: {e}")
@@ -69,30 +73,32 @@ def compute_skill_coverage(resume_skills: list, jd_skills: list) -> float:
 def compute_title_alignment(resume_text: str, jd_title: str) -> float:
     """
     Compute how well the resume aligns with the target job title.
-    Uses TF-IDF cosine similarity between the JD title and resume text.
+    Uses substring and fuzzy string matching.
     Returns score 0-1.
     """
     if not jd_title or not resume_text:
         return 0.5  # Neutral if no title to compare
 
     try:
-        # Use a simpler vectorizer for short text vs long text
-        vectorizer = TfidfVectorizer(
-            ngram_range=(1, 2),
-            max_features=1000,
-            stop_words="english",
-            dtype=np.float32,
+        title_lower = jd_title.lower().strip()
+        resume_lower = resume_text.lower()
+        
+        # Exact match anywhere:
+        if title_lower in resume_lower:
+            return 1.0
+            
+        # Isolate top 500 characters of resume (header area)
+        excerpt = resume_lower[:500]
+        
+        # Token set ratio handles words in different order 
+        # e.g., "Senior Software Engineer" vs "Software Engineer, Senior"
+        best_score = max(
+            fuzz.token_set_ratio(title_lower, excerpt),
+            fuzz.partial_ratio(title_lower, resume_lower[500:]) * 0.8  # Body match penalized slightly
         )
-        # Compare JD title against the first ~500 chars of resume (likely summary/recent titles)
-        resume_excerpt = resume_text[:500]
-        matrix = vectorizer.fit_transform([jd_title, resume_excerpt])
-        sim = cosine_similarity(matrix[0:1], matrix[1:2]).flatten()[0]
-
-        # Boost: check for exact title mention anywhere in resume
-        if jd_title.lower() in resume_text.lower():
-            sim = min(1.0, sim + 0.3)
-
-        return float(np.clip(sim, 0, 1))
+        
+        # normalize 0 to 1
+        return float(np.clip(best_score / 100.0, 0, 1))
     except Exception as e:
         logger.warning(f"Title alignment computation error: {e}")
         return 0.5
@@ -281,7 +287,7 @@ def compute_composite_score(
         resume_set = set(s.lower() for s in resume_skills)
         missing_critical = jd_top5 - resume_set
         if missing_critical:
-            penalty = len(missing_critical) / len(jd_top5) * 0.10  # up to 10% penalty
+            penalty = len(missing_critical) / len(jd_top5) * 0.05  # MAX 5% penalty
             overall = max(0, overall - penalty)
             logger.info(f"  Critical skill penalty: -{penalty:.3f} ({len(missing_critical)} missing)")
 

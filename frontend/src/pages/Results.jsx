@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import { API_BASE_URL } from '../utils/api'
 
 const COLORS = {
     indigo: '#6366f1', violet: '#8b5cf6', cyan: '#06b6d4',
@@ -44,7 +45,7 @@ export default function Results() {
     const exportRef = useRef(null)
 
     useEffect(() => {
-        fetch('/api/results')
+        fetch(`${API_BASE_URL}/api/results`)
             .then(r => { if (!r.ok) throw new Error(); return r.json() })
             .then(setResults)
             .catch(() => { })

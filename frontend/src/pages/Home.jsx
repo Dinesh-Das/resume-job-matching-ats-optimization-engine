@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE_URL } from '../utils/api'
 
 /* ═══════════════════════════════════════════════
    Antigravity Particle Universe
@@ -352,7 +353,7 @@ function StatsRow() {
   const [jobStatus, setJobStatus] = useState(null)
 
   useEffect(() => {
-    fetch('/api/jobs-status')
+    fetch(`${API_BASE_URL}/api/jobs-status`)
       .then(r => r.json())
       .then(setJobStatus)
       .catch(() => { })

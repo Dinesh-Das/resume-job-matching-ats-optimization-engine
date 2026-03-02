@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { API_BASE_URL } from '../utils/api'
 
 export default function JobsExplorer() {
     const [jobs, setJobs] = useState([])
@@ -16,7 +17,7 @@ export default function JobsExplorer() {
         setLoading(true)
         const params = new URLSearchParams({ page: p, page_size: PAGE_SIZE })
         if (q) params.set('search', q)
-        fetch(`/api/jobs-data?${params}`)
+        fetch(`${API_BASE_URL}/api/jobs-data?${params}`)
             .then(r => {
                 if (!r.ok) throw new Error('No job data found.')
                 return r.json()

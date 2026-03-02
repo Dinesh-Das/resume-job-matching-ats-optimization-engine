@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react'
+import { API_BASE_URL } from '../utils/api'
 
 export default function QuickMatch() {
     const [resumeText, setResumeText] = useState('')
@@ -16,7 +17,7 @@ export default function QuickMatch() {
         try {
             const form = new FormData()
             form.append('file', file)
-            const res = await fetch('/api/upload-resume', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/upload-resume`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setter(data.text)
@@ -45,7 +46,7 @@ export default function QuickMatch() {
             form.append('jd_text', jdText)
             if (jdTitle) form.append('jd_title', jdTitle)
 
-            const res = await fetch('/api/quick-match', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/quick-match`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setResults(data)

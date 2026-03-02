@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE_URL } from '../utils/api'
 
 export default function TrainEngine() {
     const navigate = useNavigate()
@@ -25,9 +26,9 @@ export default function TrainEngine() {
     ])
 
     const fetchData = () => {
-        fetch('/api/jobs-status').then(r => r.json()).then(setJobStatus).catch(() => { })
-        fetch('/api/model-status').then(r => r.json()).then(setModelStatus).catch(() => { })
-        fetch('/api/job-roles').then(r => r.json()).then(data => {
+        fetch(`${API_BASE_URL}/api/jobs-status`).then(r => r.json()).then(setJobStatus).catch(() => { })
+        fetch(`${API_BASE_URL}/api/model-status`).then(r => r.json()).then(setModelStatus).catch(() => { })
+        fetch(`${API_BASE_URL}/api/job-roles`).then(r => r.json()).then(data => {
             if (data && data.roles && data.roles.length > 0) setRoles(data.roles)
         }).catch(() => { })
     }
@@ -39,7 +40,7 @@ export default function TrainEngine() {
         try {
             const form = new FormData()
             Object.entries(dbForm).forEach(([k, v]) => form.append(k, v))
-            const res = await fetch('/api/connect-db', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/connect-db`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setMessage({ type: 'success', text: `✅ Fetched ${data.count} jobs from Oracle and saved locally.` })
@@ -56,7 +57,7 @@ export default function TrainEngine() {
         try {
             const form = new FormData()
             form.append('file', file)
-            const res = await fetch('/api/upload-jobs', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/upload-jobs`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setMessage({ type: 'success', text: `✅ Uploaded ${data.count} jobs successfully.` })
@@ -72,7 +73,7 @@ export default function TrainEngine() {
         try {
             const form = new FormData()
             form.append('role', selectedRole)
-            const res = await fetch('/api/train-model', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/train-model`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setMessage({ type: 'success', text: `🚀 ${data.message} The engine is now ready to score resumes!` })
@@ -86,7 +87,7 @@ export default function TrainEngine() {
     const handleTrainAll = async () => {
         setTrainAllRunning(true); setMessage(null)
         try {
-            const res = await fetch('/api/train-all', { method: 'POST' })
+            const res = await fetch(`${API_BASE_URL}/api/train-all`, { method: 'POST' })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setMessage({ type: 'success', text: `🚀 ${data.message} All engines are now ready!` })

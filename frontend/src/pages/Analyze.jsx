@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE_URL } from '../utils/api'
 
 export default function Analyze() {
     const navigate = useNavigate()
@@ -17,8 +18,8 @@ export default function Analyze() {
     const resumeInputRef = useRef(null)
 
     useEffect(() => {
-        fetch('/api/model-status').then(r => r.json()).then(setModelStatus).catch(() => { })
-        fetch('/api/job-roles').then(r => r.json()).then(data => {
+        fetch(`${API_BASE_URL}/api/model-status`).then(r => r.json()).then(setModelStatus).catch(() => { })
+        fetch(`${API_BASE_URL}/api/job-roles`).then(r => r.json()).then(data => {
             if (data && data.roles && data.roles.length > 0) setRoles(data.roles)
         }).catch(() => { })
     }, [])
@@ -41,7 +42,7 @@ export default function Analyze() {
         try {
             const form = new FormData()
             form.append('file', file)
-            const res = await fetch('/api/upload-resume', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/upload-resume`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             setResumeText(data.text)
@@ -62,7 +63,7 @@ export default function Analyze() {
             const form = new FormData()
             form.append('resume_text', resumeText)
             form.append('role', selectedRole)
-            const res = await fetch('/api/run-pipeline', { method: 'POST', body: form })
+            const res = await fetch(`${API_BASE_URL}/api/run-pipeline`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
             // Auto-navigate to results
