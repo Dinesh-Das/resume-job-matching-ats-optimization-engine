@@ -41,7 +41,7 @@ export default function JobsExplorer() {
 
     if (error && jobs.length === 0) return (
         <div className="page-container">
-            <div className="alert alert-warning">⚠️ {error} — Go to <a href="/data">Data Source</a> to load job data.</div>
+            <div className="alert alert-warning">⚠️ {error} — Go to <a href="/train">Train Engine</a> to load job data.</div>
         </div>
     )
 

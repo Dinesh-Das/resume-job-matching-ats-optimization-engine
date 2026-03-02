@@ -3,12 +3,10 @@ import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Home from './pages/Home'
 import QuickMatch from './pages/QuickMatch'
-import DataSource from './pages/DataSource'
+import TrainEngine from './pages/TrainEngine'
+import Analyze from './pages/Analyze'
 import JobsExplorer from './pages/JobsExplorer'
-import Dashboard from './pages/Dashboard'
-import GapAnalysis from './pages/GapAnalysis'
-import Recommendations from './pages/Recommendations'
-import ExportPage from './pages/ExportPage'
+import Results from './pages/Results'
 
 function Navbar() {
     return (
@@ -19,12 +17,10 @@ function Navbar() {
             <ul className="navbar-links">
                 <li><NavLink to="/" end>Home</NavLink></li>
                 <li><NavLink to="/match">Quick Match</NavLink></li>
-                <li><NavLink to="/data">Data Source</NavLink></li>
+                <li><NavLink to="/train">Train Engine</NavLink></li>
+                <li><NavLink to="/analyze">Analyze</NavLink></li>
                 <li><NavLink to="/jobs">Jobs</NavLink></li>
-                <li><NavLink to="/dashboard">Dashboard</NavLink></li>
-                <li><NavLink to="/gaps">Gap Analysis</NavLink></li>
-                <li><NavLink to="/recommendations">Recommendations</NavLink></li>
-                <li><NavLink to="/export">Export</NavLink></li>
+                <li><NavLink to="/results">Results</NavLink></li>
             </ul>
         </nav>
     )
@@ -39,12 +35,10 @@ export default function App() {
                     <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/match" element={<QuickMatch />} />
-                        <Route path="/data" element={<DataSource />} />
+                        <Route path="/train" element={<TrainEngine />} />
+                        <Route path="/analyze" element={<Analyze />} />
                         <Route path="/jobs" element={<JobsExplorer />} />
-                        <Route path="/dashboard" element={<Dashboard />} />
-                        <Route path="/gaps" element={<GapAnalysis />} />
-                        <Route path="/recommendations" element={<Recommendations />} />
-                        <Route path="/export" element={<ExportPage />} />
+                        <Route path="/results" element={<Results />} />
                     </Routes>
                 </ErrorBoundary>
             </div>

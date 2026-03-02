@@ -56,12 +56,15 @@ RESULTS_JSON = os.path.join(OUTPUT_DIR, "results.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
-app = FastAPI(title="ATS Optimization Engine API")
+from contextlib import asynccontextmanager
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Server application started and logging initialized.")
+    yield
+
+app = FastAPI(title="ATS Optimization Engine API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -304,136 +307,162 @@ async def parse_advanced(file: UploadFile = File(...)):
 
 # ── Pipeline ──────────────────────────────────
 
-@app.post("/api/train-model")
-def train_model(role: Optional[str] = Form(None)):
-    """Process jobs (optionally filtered by role), vectorize, and save the model to disk."""
+def _run_training_logic(role: Optional[str] = None):
+    """Core logic to process jobs, vectorize, and save the model for a specific role."""
     import time as _time
     if not os.path.exists(JOBS_JSON_PATH):
         raise HTTPException(status_code=400, detail="No job data found. Fetch from DB or upload first.")
 
-    try:
-        pipeline_start = _time.time()
-        log_banner(logger, f"TRAINING PIPELINE START {'[' + role.upper() + ']' if role else '[ALL]'}")
-        log_memory(logger, "pipeline start")
+    pipeline_start = _time.time()
+    log_banner(logger, f"TRAINING PIPELINE START {'[' + role.upper() + ']' if role else '[ALL]'}")
+    log_memory(logger, "pipeline start")
 
-        # 1. Load jobs
-        log_stage(logger, 1, 7, "Data Ingestion")
-        t0 = _time.time()
-        job_df = ingest_jobs(JOBS_JSON_PATH)
-        logger.info(f"[OK] Loaded {len(job_df):,} unique jobs")
+    # 1. Load jobs
+    log_stage(logger, 1, 7, "Data Ingestion")
+    t0 = _time.time()
+    job_df = ingest_jobs(JOBS_JSON_PATH)
+    logger.info(f"[OK] Loaded {len(job_df):,} unique jobs")
+    
+    # 1.1 Filter by role if specified
+    if role and role.lower() != "all":
+        role_key = role.lower()
+        if role_key not in JOB_ROLES:
+            # Try to map old UI role names for backward compatibility
+            legacy_mapping = {
+                "software_developer": "software_engineer",
+                "data": "data_scientist"
+            }
+            if role_key in legacy_mapping:
+                role_key = legacy_mapping[role_key]
+
+        if role_key not in JOB_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role: {role}. Must be a supported job role.")
         
-        # 1.1 Filter by role if specified
-        if role and role.lower() != "all":
-            role_key = role.lower()
-            if role_key not in JOB_ROLES:
-                # Try to map old UI role names for backward compatibility if needed, or just reject
-                legacy_mapping = {
-                    "software_developer": "software_engineer",
-                    "data": "data_scientist" # loose map
-                }
-                if role_key in legacy_mapping:
-                    role_key = legacy_mapping[role_key]
+        logger.info(f"Filtering jobs for role: {role_key}")
+        pattern = JOB_ROLES[role_key]["pattern"]
 
-            if role_key not in JOB_ROLES:
-                raise HTTPException(status_code=400, detail=f"Invalid role: {role}. Must be a supported job role.")
-            
-            logger.info(f"Filtering jobs for role: {role_key}")
-            pattern = JOB_ROLES[role_key]["pattern"]
+        job_df = job_df[
+            job_df["combined_text"].str.contains(pattern, case=False, regex=True) |
+            job_df["title"].str.contains(pattern, case=False, regex=True)
+        ].copy()
+        logger.info(f"Filtered to {len(job_df):,} jobs for {role_key}")
+        
+        if len(job_df) == 0:
+            raise HTTPException(status_code=400, detail=f"No jobs found matching role: {role_key}")
 
-            job_df = job_df[
-                job_df["combined_text"].str.contains(pattern, case=False, regex=True) |
-                job_df["title"].str.contains(pattern, case=False, regex=True)
-            ].copy()
-            logger.info(f"Filtered to {len(job_df):,} jobs for {role_key}")
-            
-            if len(job_df) == 0:
-                raise HTTPException(status_code=400, detail=f"No jobs found matching role: {role_key}")
+    logger.info(f"[OK] Final training set: {len(job_df):,} jobs in {_time.time()-t0:.1f}s")
+    check_memory("after ingestion")
 
-        logger.info(f"[OK] Final training set: {len(job_df):,} jobs in {_time.time()-t0:.1f}s")
-        check_memory("after ingestion")
+    # 2. Process job texts
+    log_stage(logger, 2, 7, "Text Processing")
+    t0 = _time.time()
+    processed_corpus = process_series(job_df["combined_text"])
+    logger.info(f"[OK] Text processing complete in {_time.time()-t0:.1f}s")
+    check_memory("after text processing")
 
-        # 2. Process job texts
-        log_stage(logger, 2, 7, "Text Processing")
-        t0 = _time.time()
-        processed_corpus = process_series(job_df["combined_text"])
-        logger.info(f"[OK] Text processing complete in {_time.time()-t0:.1f}s")
-        check_memory("after text processing")
+    # 3. Extract all skills
+    log_stage(logger, 3, 7, "Skill Extraction")
+    t0 = _time.time()
+    all_job_skills = extract_skills_from_jobs(job_df["combined_text"].tolist())
+    logger.info(f"[OK] Skills extracted in {_time.time()-t0:.1f}s")
+    check_memory("after skill extraction")
 
-        # 3. Extract all skills
-        log_stage(logger, 3, 7, "Skill Extraction")
-        t0 = _time.time()
-        all_job_skills = extract_skills_from_jobs(job_df["combined_text"].tolist())
-        logger.info(f"[OK] Skills extracted in {_time.time()-t0:.1f}s")
-        check_memory("after skill extraction")
+    # 4. TF-IDF
+    log_stage(logger, 4, 7, "TF-IDF Vectorisation")
+    t0 = _time.time()
+    vectorizer, tfidf_matrix, feature_names = fit_tfidf(processed_corpus)
+    logger.info(f"[OK] TF-IDF fitted: {tfidf_matrix.shape[0]:,} docs x {tfidf_matrix.shape[1]:,} features in {_time.time()-t0:.1f}s")
+    check_memory("after TF-IDF")
 
-        # 4. TF-IDF
-        log_stage(logger, 4, 7, "TF-IDF Vectorisation")
-        t0 = _time.time()
-        vectorizer, tfidf_matrix, feature_names = fit_tfidf(processed_corpus)
-        logger.info(f"[OK] TF-IDF fitted: {tfidf_matrix.shape[0]:,} docs x {tfidf_matrix.shape[1]:,} features in {_time.time()-t0:.1f}s")
-        check_memory("after TF-IDF")
+    # 5. Skill intelligence pre-computation
+    log_stage(logger, 5, 7, "Skill Intelligence")
+    t0 = _time.time()
+    skill_freq_df = skill_frequency_table(all_job_skills, len(job_df))
+    tfidf_skills = extract_statistical_skills(tfidf_matrix, feature_names, 100)
+    importance_df = compute_importance_weights(skill_freq_df, tfidf_skills)
+    logger.info(f"[OK] Skill intelligence computed in {_time.time()-t0:.1f}s ({len(skill_freq_df)} unique skills)")
 
-        # 5. Skill intelligence pre-computation
-        log_stage(logger, 5, 7, "Skill Intelligence")
-        t0 = _time.time()
-        skill_freq_df = skill_frequency_table(all_job_skills, len(job_df))
-        tfidf_skills = extract_statistical_skills(tfidf_matrix, feature_names, 100)
-        importance_df = compute_importance_weights(skill_freq_df, tfidf_skills)
-        logger.info(f"[OK] Skill intelligence computed in {_time.time()-t0:.1f}s ({len(skill_freq_df)} unique skills)")
+    # 6. Co-occurrence & clustering
+    log_stage(logger, 6, 7, "Clustering & Co-occurrence")
+    t0 = _time.time()
+    cooc = skill_cooccurrence_matrix(all_job_skills, min(20, len(skill_freq_df)))
+    cluster_data = None
+    cluster_summary_data = None
+    if len(job_df) >= 3:
+        n_clusters = min(8, len(job_df) // 2)
+        clustered = cluster_roles(tfidf_matrix, job_df, n_clusters)
+        cluster_data = clustered[["job_id", "title", "cluster"]].head(200).to_dict("records")
+        cluster_summary_data = cluster_summary(clustered).to_dict("records")
+    logger.info(f"[OK] Clustering complete in {_time.time()-t0:.1f}s")
+    check_memory("after clustering")
 
-        # 6. Co-occurrence & clustering
-        log_stage(logger, 6, 7, "Clustering & Co-occurrence")
-        t0 = _time.time()
-        cooc = skill_cooccurrence_matrix(all_job_skills, min(20, len(skill_freq_df)))
-        cluster_data = None
-        cluster_summary_data = None
-        if len(job_df) >= 3:
-            n_clusters = min(8, len(job_df) // 2)
-            clustered = cluster_roles(tfidf_matrix, job_df, n_clusters)
-            cluster_data = clustered[["job_id", "title", "cluster"]].head(200).to_dict("records")
-            cluster_summary_data = cluster_summary(clustered).to_dict("records")
-        logger.info(f"[OK] Clustering complete in {_time.time()-t0:.1f}s")
-        check_memory("after clustering")
+    # 7. Save model
+    log_stage(logger, 7, 7, "Saving Model")
+    t0 = _time.time()
+    lightweight_job_df = job_df[["job_id", "title"]].copy()
 
-        # 7. Save model
-        log_stage(logger, 7, 7, "Saving Model")
-        t0 = _time.time()
-        lightweight_job_df = job_df[["job_id", "title"]].copy()
+    model_data = {
+        "job_df": lightweight_job_df,
+        "vectorizer": vectorizer,
+        "tfidf_matrix": tfidf_matrix,
+        "importance_df": importance_df,
+        "skill_freq_df": skill_freq_df,
+        "cooc": cooc,
+        "cluster_data": cluster_data,
+        "cluster_summary_data": cluster_summary_data,
+        "industry_top_skills": importance_df["skill"].tolist() if not importance_df.empty else []
+    }
 
-        model_data = {
-            "job_df": lightweight_job_df,
-            "vectorizer": vectorizer,
-            "tfidf_matrix": tfidf_matrix,
-            "importance_df": importance_df,
-            "skill_freq_df": skill_freq_df,
-            "cooc": cooc,
-            "cluster_data": cluster_data,
-            "cluster_summary_data": cluster_summary_data,
-            "industry_top_skills": importance_df["skill"].tolist() if not importance_df.empty else []
-        }
+    success = save_model(model_data, role=role)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save model to disk.")
+    logger.info(f"[OK] Model ({role or 'all'}) saved in {_time.time()-t0:.1f}s")
 
-        success = save_model(model_data, role=role)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to save model to disk.")
-        logger.info(f"[OK] Model ({role or 'all'}) saved in {_time.time()-t0:.1f}s")
+    total_time = _time.time() - pipeline_start
+    return len(job_df), total_time
 
-        # Final summary
-        total_time = _time.time() - pipeline_start
-        log_banner(logger, "TRAINING PIPELINE COMPLETE")
-        logger.info(f"   Total time: {total_time:.1f}s")
-        logger.info(f"   Jobs processed: {len(job_df):,}")
-        logger.info(f"   Unique skills: {len(skill_freq_df):,}")
-        logger.info(f"   TF-IDF features: {tfidf_matrix.shape[1]:,}")
-        log_memory(logger, "pipeline end")
-
-        return {"status": "ok", "message": f"Successfully trained model on {len(job_df)} jobs in {total_time:.1f}s."}
-
+@app.post("/api/train-model")
+async def train_model(role: Optional[str] = Form(None)):
+    """Process jobs (optionally filtered by role), vectorize, and save the model to disk."""
+    try:
+        count, total_time = _run_training_logic(role)
+        return {"status": "ok", "message": f"Successfully trained model on {count} jobs in {total_time:.1f}s."}
+    except HTTPException:
+        raise
     except MemoryError as e:
         logger.critical(f"[CRIT] MEMORY LIMIT EXCEEDED: {e}")
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.exception("Training error")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/train-all")
+async def train_all_models():
+    """Sequentially train models for all defined roles plus the general model."""
+    import time
+    if not os.path.exists(JOBS_JSON_PATH):
+        raise HTTPException(status_code=400, detail="No job data found. Fetch from DB or upload first.")
+
+    roles_to_train = ["all"] + list(JOB_ROLES.keys())
+    results = []
+    start_all = time.time()
+
+    try:
+        for r in roles_to_train:
+            logger.info(f"--- Bulk Training Stage: {r.upper()} ---")
+            count, t = _run_training_logic(r)
+            results.append({"role": r, "jobs": count, "time": round(t, 2)})
+        
+        total_duration = time.time() - start_all
+        return {
+            "status": "ok",
+            "message": f"Successfully trained {len(roles_to_train)} models in {total_duration:.1f}s.",
+            "details": results
+        }
+    except Exception as e:
+        logger.exception("Bulk training error")
+        raise HTTPException(status_code=500, detail=str(e))
+
         
 
 @app.get("/api/job-roles")
