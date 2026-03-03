@@ -23,7 +23,7 @@ def save_model(model_data: dict, role: str = None):
     filepath = get_model_path(role)
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        joblib.dump(model_data, filepath)
+        joblib.dump(model_data, filepath, compress=3)
         logger.info(f"Model ({role or 'all'}) successfully saved to {filepath}")
         return True
     except Exception as e:
