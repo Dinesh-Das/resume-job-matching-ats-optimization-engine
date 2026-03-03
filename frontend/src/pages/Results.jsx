@@ -30,7 +30,7 @@ function ScoreGauge({ score }) {
                 <text x="100" y="85" textAnchor="middle" fill={color} fontSize="36" fontWeight="800">{score.toFixed(1)}</text>
                 <text x="100" y="105" textAnchor="middle" fill="#94a3b8" fontSize="11">/ 100</text>
             </svg>
-            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.25rem' }}>ATS Match Score</p>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.25rem' }}>Target Match Score</p>
         </div>
     )
 }
@@ -192,8 +192,8 @@ export default function Results() {
             {/* ── Summary Metrics (always visible) ── */}
             <div className="grid-4 animate-in" style={{ animationDelay: '50ms' }}>
                 <div className="metric-card">
-                    <div className="metric-value">{s.overall_score?.toFixed(1)}</div>
-                    <div className="metric-label">ATS Score</div>
+                    <div className="metric-value">{(results.overall_match_score || s.best_match_score || s.overall_score)?.toFixed(1)}</div>
+                    <div className="metric-label">Target Match</div>
                 </div>
                 <div className="metric-card">
                     <div className="metric-value">{gapSummary.coverage_pct?.toFixed(1)}%</div>
@@ -230,7 +230,7 @@ export default function Results() {
                     {/* Score Gauge + Histogram */}
                     <div className="grid-2" style={{ marginTop: '0.5rem' }}>
                         <div className="glass-card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2rem' }}>
-                            <ScoreGauge score={s.overall_score || 0} />
+                            <ScoreGauge score={results.overall_match_score || s.best_match_score || s.overall_score || 0} />
                         </div>
                         <div className="glass-card">
                             <h3 style={{ marginBottom: '1rem' }}>Score Distribution</h3>

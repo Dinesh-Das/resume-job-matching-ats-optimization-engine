@@ -45,7 +45,13 @@ def compute_scores(resume_vector, job_matrix) -> np.ndarray:
         from scipy import sparse
         similarities = (job_matrix.dot(resume_vector.T)).toarray().flatten()
 
-    scores = np.clip(similarities * SCORE_SCALE, 0, 100)
+    # Non-linear scaling: raw cosine similarity for TF-IDF is typically
+    # in the 0.02-0.35 range. A linear *100 maps these to 2-35, which
+    # looks misleadingly low. A power curve (sim^0.5 * 200) stretches
+    # the meaningful range so strong matches land in the 60-100 zone:
+    #   0.05 → 44,  0.10 → 63,  0.20 → 89,  0.25 → 100
+    boosted = np.power(np.maximum(similarities, 0), 0.5) * 200
+    scores = np.clip(boosted, 0, 100)
     return scores
 
 
@@ -64,6 +70,7 @@ def score_summary(scores: np.ndarray, job_df: pd.DataFrame) -> dict:
 
     summary = {
         "overall_score": round(float(np.mean(scores)), 2),
+        "best_match_score": round(float(np.max(scores)), 2),
         "mean": round(float(np.mean(scores)), 2),
         "median": round(float(np.median(scores)), 2),
         "std": round(float(np.std(scores)), 2),
