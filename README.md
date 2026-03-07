@@ -9,25 +9,44 @@
 
 ---
 
-## � Visual Overview
+## 🖼️ Visual Overview
 
-````carousel
-![Home Screen](frontend/public/Home.png)
-<!-- slide -->
-![Quick Match Interface](frontend/public/QuickMatch.png)
-<!-- slide -->
-![Analysis Dashboard](frontend/public/Dashboard.png)
-<!-- slide -->
-![Job Corpus Explorer](frontend/public/Corpus.png)
-<!-- slide -->
-![detailed Report Export](frontend/public/Report.png)
-<!-- slide -->
-![Model Training Engine](frontend/public/TrainEngine.png)
-````
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="33%">
+        <img src="frontend/public/Home.png" alt="Home Screen" width="100%"/><br/>
+        <sub><b>Home Screen</b></sub>
+      </td>
+      <td align="center" width="33%">
+        <img src="frontend/public/QuickMatch.png" alt="Quick Match Interface" width="100%"/><br/>
+        <sub><b>Quick Match Interface</b></sub>
+      </td>
+      <td align="center" width="33%">
+        <img src="frontend/public/Dashboard.png" alt="Analysis Dashboard" width="100%"/><br/>
+        <sub><b>Analysis Dashboard</b></sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="33%">
+        <img src="frontend/public/Corpus.png" alt="Job Corpus Explorer" width="100%"/><br/>
+        <sub><b>Job Corpus Explorer</b></sub>
+      </td>
+      <td align="center" width="33%">
+        <img src="frontend/public/Report.png" alt="Detailed Report Export" width="100%"/><br/>
+        <sub><b>Detailed Report Export</b></sub>
+      </td>
+      <td align="center" width="33%">
+        <img src="frontend/public/TrainEngine.png" alt="Model Training Engine" width="100%"/><br/>
+        <sub><b>Model Training Engine</b></sub>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ---
 
-## �🔗 Quick Links
+## 🔗 Quick Links
 
 | Resource | URL |
 |---|---|
