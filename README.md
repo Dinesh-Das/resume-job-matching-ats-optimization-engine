@@ -1,7 +1,3 @@
-<div align="center">
-  <img src="ATS_ENGINE.png" alt="ATS Engine Logo" width="200" />
-</div>
-
 # 🧠 Resume-Job Matching & ATS Optimization Engine
 
 
