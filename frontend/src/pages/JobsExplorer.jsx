@@ -17,7 +17,9 @@ export default function JobsExplorer() {
         setLoading(true)
         const params = new URLSearchParams({ page: p, page_size: PAGE_SIZE })
         if (q) params.set('search', q)
-        fetch(`${API_BASE_URL}/api/jobs-data?${params}`)
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 30000)
+        fetch(`${API_BASE_URL}/api/jobs-data?${params}`, { signal: ctrl.signal })
             .then(r => {
                 if (!r.ok) throw new Error('No job data found.')
                 return r.json()
@@ -28,7 +30,8 @@ export default function JobsExplorer() {
                 setTotalPages(data.total_pages || 0)
                 setLoading(false)
             })
-            .catch(e => { setError(e.message); setLoading(false) })
+            .catch(e => { setError(e.message || 'No job data found.'); setLoading(false) })
+            .finally(() => clearTimeout(timer))
     }, [])
 
     useEffect(() => {
@@ -42,7 +45,23 @@ export default function JobsExplorer() {
 
     if (error && jobs.length === 0) return (
         <div className="page-container">
-            <div className="alert alert-warning">⚠️ {error} — Go to <a href="/train">Train Engine</a> to load job data.</div>
+            <div className="page-header animate-in">
+                <h1>📋 Jobs Explorer</h1>
+                <p>Browse your scraped job listings</p>
+            </div>
+            <div className="glass-card animate-in" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📭</div>
+                <h2 style={{ marginBottom: '0.75rem' }}>No Job Data Found</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem', maxWidth: 480, margin: '0 auto 0.5rem' }}>
+                    Your corpus is empty. Import job data from Oracle or upload a file to populate it.
+                </p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+                    Once loaded, your jobs will appear here with search and filtering.
+                </p>
+                <a href="/train" className="btn btn-primary">
+                    ⚙️ Go to Train Engine to Import Data →
+                </a>
+            </div>
         </div>
     )
 

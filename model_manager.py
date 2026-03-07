@@ -51,3 +51,43 @@ def is_model_trained(role: str = None) -> bool:
     Check if the model file exists on disk.
     """
     return os.path.exists(get_model_path(role))
+
+
+class ModelManager:
+    """
+    Class-level singleton cache for ML models loaded across requests.
+    Heavy models (sentence-transformers) are loaded once and reused for the
+    life of the server process.
+    """
+    _semantic_model = None
+
+    @classmethod
+    def get_semantic_model(cls):
+        """
+        Load and cache the sentence-transformer model.
+        Returns None on failure — caller must handle gracefully.
+        SentenceTransformer is imported here (not at module level) so that a
+        missing package never prevents the rest of the server from starting.
+        """
+        if cls._semantic_model is None:
+            try:
+                import torch
+                from sentence_transformers import SentenceTransformer
+                
+                # Auto-detect hardware. User has an RTX 4060.
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                logger.info(f"Loading semantic model: all-MiniLM-L6-v2 on {device.upper()}")
+                
+                cls._semantic_model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
+                
+                if device == "cuda":
+                    logger.info(f"Semantic model successfully loaded into VRAM ({torch.cuda.get_device_name(0)})")
+                else:
+                    logger.info("Semantic model loaded successfully on CPU")
+            except Exception as e:
+                logger.warning(
+                    f"Semantic model failed to load: {e}. "
+                    "Semantic scoring will be skipped."
+                )
+                return None
+        return cls._semantic_model

@@ -5,6 +5,7 @@ import { API_BASE_URL } from '../utils/api'
 export default function Analyze() {
     const navigate = useNavigate()
     const [modelStatus, setModelStatus] = useState(null)
+    const [modelLoading, setModelLoading] = useState(true)
     const [loading, setLoading] = useState(false)
     const [message, setMessage] = useState(null)
     const [resumeText, setResumeText] = useState(null)
@@ -18,10 +19,22 @@ export default function Analyze() {
     const resumeInputRef = useRef(null)
 
     useEffect(() => {
-        fetch(`${API_BASE_URL}/api/model-status`).then(r => r.json()).then(setModelStatus).catch(() => { })
-        fetch(`${API_BASE_URL}/api/job-roles`).then(r => r.json()).then(data => {
-            if (data && data.roles && data.roles.length > 0) setRoles(data.roles)
-        }).catch(() => { })
+        const fetchWithTimeout = (url, ms = 3000) => {
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), ms)
+            return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer))
+        }
+
+        setModelLoading(true)
+        Promise.allSettled([
+            fetchWithTimeout(`${API_BASE_URL}/api/model-status`)
+                .then(r => r.json()).then(setModelStatus)
+                .catch(() => setModelStatus({ trained: false, roles: {} })),
+            fetchWithTimeout(`${API_BASE_URL}/api/job-roles`)
+                .then(r => r.json()).then(data => {
+                    if (data && data.roles && data.roles.length > 0) setRoles(data.roles)
+                }).catch(() => { }),
+        ]).finally(() => setModelLoading(false))
     }, [])
 
     // Auto-select first trained role
@@ -66,7 +79,6 @@ export default function Analyze() {
             const res = await fetch(`${API_BASE_URL}/api/run-pipeline`, { method: 'POST', body: form })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail)
-            // Auto-navigate to results
             navigate('/results')
         } catch (e) {
             setMessage({ type: 'error', text: `❌ ${e.message}` })
@@ -81,28 +93,6 @@ export default function Analyze() {
         if (file) handleResumeUpload(file)
     }
 
-    // No model trained — show call-to-action
-    if (modelStatus && !anyRoleTrained) {
-        return (
-            <div className="page-container">
-                <div className="page-header animate-in">
-                    <h1>📄 Analyze Resume</h1>
-                    <p>Upload your resume and run the analysis pipeline against a trained model.</p>
-                </div>
-                <div className="glass-card animate-in" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
-                    <h2 style={{ marginBottom: '0.75rem' }}>No Trained Model Found</h2>
-                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', maxWidth: 480, margin: '0 auto 1.5rem' }}>
-                        You need to import job data and train a model before you can analyze resumes.
-                    </p>
-                    <button className="btn btn-primary btn-lg" onClick={() => navigate('/train')}>
-                        ⚙️ Go to Train Engine →
-                    </button>
-                </div>
-            </div>
-        )
-    }
-
     return (
         <div className="page-container">
             <div className="page-header animate-in">
@@ -114,35 +104,56 @@ export default function Analyze() {
                 <div className={`alert alert-${message.type}`}>{message.text}</div>
             )}
 
+            {/* ── No model trained warning (inline, non-blocking) */}
+            {!modelLoading && modelStatus && !anyRoleTrained && (
+                <div className="glass-card animate-in" style={{ marginBottom: '1.5rem', border: '1px solid rgba(245,158,11,0.3)', textAlign: 'center', padding: '1.5rem 2rem' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚠️</div>
+                    <h3 style={{ marginBottom: '0.5rem', color: 'var(--accent-amber)' }}>No Trained Model Found</h3>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                        You need to import job data and train a model before analyzing resumes.
+                    </p>
+                    <button className="btn btn-primary" onClick={() => navigate('/train')}>
+                        ⚙️ Go to Train Engine →
+                    </button>
+                </div>
+            )}
+
             {/* ── Step 1: Select Trained Model ────── */}
             <div className="glass-card animate-in" style={{ marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
                     <span className="step-number">1</span>
                     <h2 style={{ fontSize: '1.35rem' }}>Select Model</h2>
                 </div>
-                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <div className="form-group" style={{ flex: 1, minWidth: '280px', marginBottom: 0 }}>
-                        <label className="form-label">🎯 Trained Role Model</label>
-                        <select
-                            className="form-input"
-                            style={{ background: 'rgba(255,255,255,0.05)', color: 'white', cursor: 'pointer' }}
-                            value={selectedRole}
-                            onChange={(e) => setSelectedRole(e.target.value)}
-                        >
-                            {roles.map(r => (
-                                <option key={r.id} value={r.id} style={{ background: '#1c1c1c' }}>
-                                    {r.label} {modelStatus?.roles?.[r.id] ? '(Trained 🟢)' : '(Untrained ⚪)'}
-                                </option>
-                            ))}
-                        </select>
+                {modelLoading ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                        <div className="spinner" style={{ width: 16, height: 16 }} />
+                        Loading available models...
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: isCurrentRoleTrained ? 'var(--accent-emerald)' : 'var(--accent-amber)', fontSize: '0.9rem' }}>
-                        {isCurrentRoleTrained
-                            ? <><span>✓</span> Model trained and ready</>
-                            : <><span>⚠</span> Selected role not trained — <a href="/train" style={{ color: 'var(--accent-cyan)' }}>train it</a></>
-                        }
+                ) : (
+                    <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div className="form-group" style={{ flex: 1, minWidth: '280px', marginBottom: 0 }}>
+                            <label className="form-label">🎯 Trained Role Model</label>
+                            <select
+                                className="form-input"
+                                style={{ background: 'rgba(255,255,255,0.05)', color: 'white', cursor: 'pointer' }}
+                                value={selectedRole}
+                                onChange={(e) => setSelectedRole(e.target.value)}
+                            >
+                                {roles.map(r => (
+                                    <option key={r.id} value={r.id} style={{ background: '#1c1c1c' }}>
+                                        {r.label} {modelStatus?.roles?.[r.id] ? '(Trained 🟢)' : '(Untrained ⚪)'}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: isCurrentRoleTrained ? 'var(--accent-emerald)' : 'var(--accent-amber)', fontSize: '0.9rem' }}>
+                            {isCurrentRoleTrained
+                                ? <><span>✓</span> Model trained and ready</>
+                                : <><span>⚠</span> Selected role not trained — <a href="/train" style={{ color: 'var(--accent-cyan)' }}>train it</a></>
+                            }
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             {/* ── Step 2: Upload Resume ────── */}
@@ -160,9 +171,9 @@ export default function Analyze() {
                     onDragLeave={e => e.currentTarget.classList.remove('dragover')}
                     onDrop={handleDrop}
                 >
-                    <div className="dropzone-icon">{resumeText ? '✅' : '📄'}</div>
+                    <div className="dropzone-icon">{loading ? '⏳' : resumeText ? '✅' : '📄'}</div>
                     <div className="dropzone-text">
-                        {resumeText ? `Resume loaded (${resumeText.length} chars) — click to replace` : 'Drop your resume here or click to browse'}
+                        {loading ? 'Parsing resume...' : resumeText ? `Resume loaded (${resumeText.length} chars) — click to replace` : 'Drop your resume here or click to browse'}
                     </div>
                     <div className="dropzone-hint">PDF, DOCX, TXT</div>
                 </div>
@@ -181,9 +192,12 @@ export default function Analyze() {
                     ) : '🚀 Run Analysis Pipeline'}
                 </button>
                 <p style={{ color: 'var(--text-muted)', marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                    {resumeText
-                        ? <>Matching against the <strong style={{ color: 'var(--text-secondary)' }}>{roles.find(r => r.id === selectedRole)?.label}</strong> model.</>
-                        : 'Upload a resume to enable analysis.'}
+                    {!resumeText
+                        ? 'Upload a resume to enable analysis.'
+                        : !isCurrentRoleTrained
+                            ? 'Train a model for the selected role before running analysis.'
+                            : <>Matching against the <strong style={{ color: 'var(--text-secondary)' }}>{roles.find(r => r.id === selectedRole)?.label}</strong> model.</>
+                    }
                 </p>
             </div>
 
@@ -199,13 +213,19 @@ export default function Analyze() {
             <style>{`
         .step-number {
           display: inline-flex; align-items: center; justify-content: center;
-          width: 32px; height: 32px; border-radius: 50%;
-          background: var(--gradient-primary); color: white;
-          font-weight: 800; font-size: 0.9rem; flex-shrink: 0;
+          width: 28px; height: 28px; border-radius: 50%;
+          background: var(--plasma-dim);
+          border: 1px solid rgba(0,212,255,0.3);
+          color: var(--plasma);
+          font-family: 'Orbitron', sans-serif;
+          font-weight: 700;
+          font-size: 0.75rem;
+          flex-shrink: 0;
         }
         .cta-pulse:not(:disabled) {
-          animation: pulse-glow 2s ease-in-out infinite;
+          animation: plasma-pulse 2s ease-in-out infinite;
         }
+        select.form-input option { background: var(--deep); color: var(--text); }
       `}</style>
         </div>
     )

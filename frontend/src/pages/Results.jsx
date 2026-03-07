@@ -4,17 +4,17 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { API_BASE_URL } from '../utils/api'
 
 const COLORS = {
-    indigo: '#6366f1', violet: '#8b5cf6', cyan: '#06b6d4',
-    emerald: '#10b981', amber: '#f59e0b', red: '#ef4444',
+    plasma: '#00d4ff', ion: '#7effd4', violet: '#a78bfa',
+    solar: '#ffcb47', flare: '#ff4e6a', deep: '#0d1220',
 }
 
 const PRIORITY_COLORS = {
-    critical: '#ef4444', recommended: '#f59e0b',
-    optional: '#6366f1', present: '#10b981',
+    critical: '#ff4e6a', recommended: '#ffcb47',
+    optional: '#00d4ff', present: '#7effd4',
 }
 
 function ScoreGauge({ score }) {
-    const color = score >= 70 ? COLORS.emerald : score >= 40 ? COLORS.amber : COLORS.red
+    const color = score >= 70 ? COLORS.ion : score >= 40 ? COLORS.solar : COLORS.flare
     const pct = Math.min(score, 100)
     const r = 80
     const circumference = Math.PI * r
@@ -23,14 +23,14 @@ function ScoreGauge({ score }) {
     return (
         <div style={{ textAlign: 'center' }}>
             <svg width="200" height="120" viewBox="0 0 200 120">
-                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" strokeLinecap="round" />
-                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke={color} strokeWidth="12" strokeLinecap="round"
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="12" strokeLinecap="butt" />
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke={color} strokeWidth="12" strokeLinecap="butt"
                     strokeDasharray={circumference} strokeDashoffset={offset}
-                    style={{ transition: 'stroke-dashoffset 1s ease-out' }} />
-                <text x="100" y="85" textAnchor="middle" fill={color} fontSize="36" fontWeight="800">{score.toFixed(1)}</text>
-                <text x="100" y="105" textAnchor="middle" fill="#94a3b8" fontSize="11">/ 100</text>
+                    style={{ transition: 'stroke-dashoffset 1.8s cubic-bezier(0.4,0,0.2,1)' }} />
+                <text x="100" y="85" textAnchor="middle" fill={color} fontSize="36" fontFamily="Orbitron,sans-serif" fontWeight="700">{score.toFixed(1)}</text>
+                <text x="100" y="105" textAnchor="middle" fill="#6a7d99" fontSize="11" fontFamily="IBM Plex Mono,monospace">/100</text>
             </svg>
-            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.25rem' }}>Target Match Score</p>
+            <p style={{ color: 'var(--text-sub)', fontSize: '0.75rem', marginTop: '0.25rem', fontFamily: 'IBM Plex Mono,monospace', letterSpacing: '1px' }}>TARGET MATCH SCORE</p>
         </div>
     )
 }
@@ -42,6 +42,7 @@ export default function Results() {
     const [activeTab, setActiveTab] = useState('overview')
     const [recFilter, setRecFilter] = useState(['critical', 'recommended'])
     const [exportOpen, setExportOpen] = useState(false)
+    const [expandedJob, setExpandedJob] = useState(null)
     const exportRef = useRef(null)
 
     useEffect(() => {
@@ -240,7 +241,7 @@ export default function Results() {
                                     <XAxis dataKey="range" tick={{ fill: '#94a3b8', fontSize: 11 }} />
                                     <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
                                     <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }} />
-                                    <Bar dataKey="count" fill={COLORS.indigo} radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="count" fill={COLORS.plasma} radius={[4, 4, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -284,13 +285,40 @@ export default function Results() {
                                 {(s.top_matches || []).slice(0, 15).map((m, i) => {
                                     const level = m.score >= 70 ? 'High' : m.score >= 40 ? 'Medium' : 'Low'
                                     const cls = m.score >= 70 ? 'score-high' : m.score >= 40 ? 'score-mid' : 'score-low'
+                                    const isExpanded = expandedJob === i
                                     return (
-                                        <tr key={i}>
-                                            <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                                            <td style={{ fontWeight: 500 }}>{m.title}</td>
-                                            <td className={cls} style={{ fontWeight: 700 }}>{m.score?.toFixed(1)}</td>
-                                            <td><span className={`badge badge-${level === 'High' ? 'present' : level === 'Medium' ? 'recommended' : 'critical'}`}>{level}</span></td>
-                                        </tr>
+                                        <React.Fragment key={i}>
+                                            <tr
+                                                onClick={() => setExpandedJob(isExpanded ? null : i)}
+                                                style={{ cursor: 'pointer', background: isExpanded ? 'var(--hover)' : '' }}
+                                            >
+                                                <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                                <td style={{ fontWeight: 500 }}>
+                                                    {m.title}
+                                                </td>
+                                                <td className={cls} style={{ fontWeight: 700 }}>{m.score?.toFixed(1)}</td>
+                                                <td><span className={`badge badge-${level === 'High' ? 'present' : level === 'Medium' ? 'recommended' : 'critical'}`}>{level}</span></td>
+                                            </tr>
+                                            {isExpanded && (
+                                                <tr style={{ background: 'var(--hover)' }}>
+                                                    <td colSpan="4" style={{ padding: '0 1.5rem 1.5rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}>
+                                                        <div style={{ background: 'var(--deep)', padding: '1.25rem', borderRadius: '6px', border: '1px solid var(--border)', marginTop: '0.5rem' }}>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                                                <h4 style={{ margin: 0, color: 'var(--plasma)' }}>{m.title}</h4>
+                                                                {m.url && (
+                                                                    <a href={m.url} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm" style={{ padding: '0.3rem 0.8rem' }}>
+                                                                        VISIT POSTING ↗
+                                                                    </a>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ maxHeight: '200px', overflowY: 'auto', paddingRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                                                                {m.jobdescription || "No job description available."}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
                                     )
                                 })}
                             </tbody>
@@ -474,45 +502,47 @@ export default function Results() {
             <style>{`
         .tab-bar {
           display: flex;
-          gap: 0.25rem;
+          gap: 0.2rem;
           margin-top: 1.5rem;
           margin-bottom: 1rem;
-          border-bottom: 1px solid var(--border-glass);
+          border-bottom: 1px solid var(--border);
           padding-bottom: 0;
           position: sticky;
-          top: 64px;
+          top: 56px;
           z-index: 10;
-          background: var(--bg-primary);
+          background: var(--void);
           padding-top: 0.5rem;
         }
         .tab-btn {
-          padding: 0.75rem 1.25rem;
-          font-size: 0.95rem;
-          font-weight: 600;
-          font-family: inherit;
+          padding: 0.6rem 1.1rem;
+          font-size: 0.72rem;
+          font-weight: 500;
+          font-family: 'IBM Plex Mono', monospace;
           background: none;
           border: none;
           border-bottom: 2px solid transparent;
-          color: var(--text-secondary);
+          color: var(--text-ghost);
           cursor: pointer;
           transition: all var(--transition-fast);
           white-space: nowrap;
+          letter-spacing: 1px;
+          text-transform: uppercase;
         }
-        .tab-btn:hover { color: var(--text-primary); }
+        .tab-btn:hover { color: var(--text-sub); }
         .tab-btn.tab-active {
-          color: var(--accent-indigo);
-          border-bottom-color: var(--accent-indigo);
+          color: var(--plasma);
+          border-bottom-color: var(--plasma);
         }
         .export-dropdown {
           position: absolute;
           top: calc(100% + 8px);
           right: 0;
           min-width: 220px;
-          background: rgba(15, 20, 40, 0.95);
-          border: 1px solid var(--border-glass);
-          border-radius: var(--radius-md);
-          padding: 0.5rem;
-          box-shadow: var(--shadow-lg);
+          background: var(--lift);
+          border: 1px solid var(--border-lit);
+          border-radius: 6px;
+          padding: 0.4rem;
+          box-shadow: var(--card-shadow);
           z-index: 50;
           display: flex;
           flex-direction: column;
@@ -521,19 +551,21 @@ export default function Results() {
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          padding: 0.65rem 0.75rem;
-          font-size: 0.88rem;
-          font-family: inherit;
-          color: var(--text-primary);
+          padding: 0.6rem 0.75rem;
+          font-size: 0.78rem;
+          font-family: 'IBM Plex Mono', monospace;
+          color: var(--text);
           background: none;
           border: none;
-          border-radius: var(--radius-sm);
+          border-radius: 4px;
           cursor: pointer;
           transition: background var(--transition-fast);
           text-align: left;
+          letter-spacing: 0.5px;
         }
         .export-item:hover {
-          background: rgba(99, 102, 241, 0.12);
+          background: var(--hover);
+          color: var(--plasma);
         }
       `}</style>
         </div>

@@ -8,20 +8,42 @@ import Analyze from './pages/Analyze'
 import JobsExplorer from './pages/JobsExplorer'
 import Results from './pages/Results'
 
+const NAV_TABS = [
+    { label: 'QUICK MATCH', to: '/match' },
+    { label: 'CORPUS', to: '/jobs' },
+    { label: 'TRAIN ENGINE', to: '/train' },
+    { label: 'DASHBOARD', to: '/analyze' },
+    { label: 'EXPORT', to: '/results' },
+]
+
 function Navbar() {
+    const location = useLocation()
+    const isHome = location.pathname === '/'
+
     return (
-        <nav className="navbar">
-            <NavLink to="/" className="navbar-logo">
-                🎯 <span>ATS Engine</span>
+        <nav className="navbar" style={{ background: isHome ? 'transparent' : 'rgba(4,5,8,0.85)' }}>
+            {/* Logo */}
+            <NavLink to="/" className="navbar-logo" style={{ textDecoration: 'none' }}>
+                <span className="navbar-logo-dot" />
+                <span>ATSENGINE</span>
             </NavLink>
-            <ul className="navbar-links">
-                <li><NavLink to="/" end>Home</NavLink></li>
-                <li><NavLink to="/match">Quick Match</NavLink></li>
-                <li><NavLink to="/train">Train Engine</NavLink></li>
-                <li><NavLink to="/analyze">Analyze</NavLink></li>
-                <li><NavLink to="/jobs">Jobs</NavLink></li>
-                <li><NavLink to="/results">Results</NavLink></li>
+
+            {/* Center Tab Switcher */}
+            <ul className="navbar-tabs">
+                {NAV_TABS.map(tab => (
+                    <li key={tab.to}>
+                        <NavLink
+                            to={tab.to}
+                            className={({ isActive }) => isActive ? 'active' : ''}
+                        >
+                            {tab.label}
+                        </NavLink>
+                    </li>
+                ))}
             </ul>
+
+            {/* Status Chip */}
+            <div className="navbar-status">READY</div>
         </nav>
     )
 }

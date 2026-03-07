@@ -18,14 +18,18 @@ def build_vectorizer(corpus_size: int = 0) -> TfidfVectorizer:
     """
     # Combine sklearn's English stop words with our domain stop words
     stop_words = list(DOMAIN_STOP_WORDS)
-    
-    # Cap max features to prevent OOMs on massive >200K datasets
+    # User has 32GB RAM, so we can afford slightly higher feature ceilings
+    # for massive datasets without hitting OOM, yielding better accuracy
     max_features = TFIDF_PARAMS["max_features"]
-    if corpus_size > 200000:
-        max_features = min(max_features, 4000)
-    elif corpus_size > 100000:
+    if corpus_size > 300000:
         max_features = min(max_features, 6000)
+    elif corpus_size > 150000:
+        max_features = min(max_features, 8000)
 
+    # Note: TfidfVectorizer does not natively accept n_jobs parameters in the constructor for version <1.3 
+    # but the underlying transformations in later versions or specific pipelines handle it. 
+    # For TfidfVectorizer itself, the heavy lifting is single-threaded in the vocabulary building phase, 
+    # but we can configure its token pattern.
     vectorizer = TfidfVectorizer(
         ngram_range=TFIDF_PARAMS["ngram_range"],
         max_features=max_features,

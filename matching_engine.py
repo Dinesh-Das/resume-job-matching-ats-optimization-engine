@@ -46,12 +46,14 @@ def compute_scores(resume_vector, job_matrix) -> np.ndarray:
         similarities = (job_matrix.dot(resume_vector.T)).toarray().flatten()
 
     # Non-linear scaling: raw cosine similarity for TF-IDF is typically
-    # in the 0.02-0.35 range. A linear *100 maps these to 2-35, which
-    # looks misleadingly low. A power curve (sim^0.5 * 200) stretches
-    # the meaningful range so strong matches land in the 60-100 zone:
-    #   0.05 → 44,  0.10 → 63,  0.20 → 89,  0.25 → 100
-    boosted = np.power(np.maximum(similarities, 0), 0.5) * 200
-    scores = np.clip(boosted, 0, 100)
+    # in the 0.05-0.35 range. A linear *100 maps these to 5-35.
+    # We use a hyperbolic tangent (tanh) curve to aggressively boost mid-range 
+    # scores while ensuring they asymptotically approach 100 without 
+    # flat-lining and hitting a hard ceiling, preserving rank uniqueness.
+    #   0.10 → 53,  0.20 → 83,  0.25 → 90.5, 0.30 → 94.6, 0.40 → 98.3
+    similarities = np.maximum(similarities, 0)
+    scores = np.tanh(similarities * 6.0) * 100
+    scores = np.clip(scores, 0, 100)
     return scores
 
 
@@ -64,7 +66,12 @@ def score_summary(scores: np.ndarray, job_df: pd.DataFrame) -> dict:
     dict with keys: overall_score, mean, median, std, min, max,
     percentile_25, percentile_75, top_matches, bottom_matches, all_scores_df
     """
-    job_scores = job_df[["job_id", "title"]].copy()
+    cols = ["job_id", "title"]
+    if "url" in job_df.columns:
+        cols.append("url")
+    if "jobdescription" in job_df.columns:
+        cols.append("jobdescription")
+    job_scores = job_df[cols].copy()
     job_scores["score"] = np.round(scores, 2)
     job_scores = job_scores.sort_values("score", ascending=False).reset_index(drop=True)
 
@@ -93,3 +100,65 @@ def score_summary(scores: np.ndarray, job_df: pd.DataFrame) -> dict:
 def get_percentile_rank(score: float, scores: np.ndarray) -> float:
     """Return the percentile rank of a given score within the distribution."""
     return round(float(np.sum(scores <= score) / len(scores) * 100), 1)
+
+
+def compute_semantic_similarity(resume_text: str, jd_text: str) -> dict:
+    """
+    Compute semantic similarity between resume and JD using sentence embeddings.
+
+    Returns:
+        score       – float 0-100  (None if unavailable)
+        confidence  – float 0-1    (reliability based on input length)
+        available   – bool         (False when model not loaded)
+        raw_cosine  – float        (raw cosine, useful for debugging)
+
+    Always returns a dict and never raises.
+    """
+    from model_manager import ModelManager
+
+    _unavailable = {"score": None, "confidence": 0.0, "available": False}
+
+    model = ModelManager.get_semantic_model()
+    if model is None:
+        return _unavailable
+
+    try:
+        def _split(text):
+            return [s.strip() for s in text.replace("\n", ". ").split(".")
+                    if len(s.strip()) > 15]
+
+        r_sents = _split(resume_text)
+        j_sents = _split(jd_text)
+
+        if len(r_sents) < 3 or len(j_sents) < 3:
+            return _unavailable
+
+        r_vecs = model.encode(r_sents, convert_to_numpy=True, show_progress_bar=False)
+        j_vecs = model.encode(j_sents, convert_to_numpy=True, show_progress_bar=False)
+
+        r_mean = r_vecs.mean(axis=0)
+        j_mean = j_vecs.mean(axis=0)
+
+        denom = np.linalg.norm(r_mean) * np.linalg.norm(j_mean)
+        if denom == 0:
+            return _unavailable
+
+        cosine = float(np.dot(r_mean, j_mean) / denom)
+
+        # Map practical cosine range [0.25, 0.90] → [0, 100]
+        LOW, HIGH = 0.25, 0.90
+        score = round(max(0.0, min(100.0, (cosine - LOW) / (HIGH - LOW) * 100)), 1)
+
+        # Confidence saturates at 20+ sentences per input
+        confidence = round(min(1.0, min(len(r_sents), len(j_sents)) / 20.0), 2)
+
+        return {
+            "score":      score,
+            "confidence": confidence,
+            "available":  True,
+            "raw_cosine": round(cosine, 4),
+        }
+
+    except Exception as e:
+        logger.warning(f"Semantic similarity computation failed: {e}")
+        return _unavailable

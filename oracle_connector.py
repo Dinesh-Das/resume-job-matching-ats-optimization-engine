@@ -52,7 +52,7 @@ def connect_oracle(host: str = "localhost",
 
 
 def fetch_jobs(connection, table_name: str = "JOBDETAILS",
-               limit: int = None) -> list:
+               limit: int = None, progress_callback=None) -> list:
     """
     Fetch all rows from the JOBDETAILS table.
 
@@ -67,6 +67,18 @@ def fetch_jobs(connection, table_name: str = "JOBDETAILS",
     list of dicts, each dict is one job record.
     """
     cursor = connection.cursor()
+
+    # Get total count for progress reporting
+    total_records = None
+    if progress_callback:
+        count_query = f"SELECT COUNT(*) FROM {table_name}"
+        if limit:
+            count_query = f"SELECT COUNT(*) FROM {table_name} WHERE ROWNUM <= {limit}"
+        try:
+            cursor.execute(count_query)
+            total_records = cursor.fetchone()[0]
+        except Exception as e:
+            logger.warning(f"Could not fetch total count: {e}")
 
     query = f"SELECT * FROM {table_name}"
     if limit:
@@ -98,8 +110,19 @@ def fetch_jobs(connection, table_name: str = "JOBDETAILS",
             record[mapped_name] = str(value)
 
         rows.append(record)
+        
+        # Report progress every 5000 rows
+        if progress_callback and len(rows) % 5000 == 0:
+            if total_records:
+                pct = min(0.9, len(rows) / total_records)
+                progress_callback(pct, f"Fetched {len(rows):,} of {total_records:,} records...")
+            else:
+                progress_callback(0.5, f"Fetched {len(rows):,} records...")
 
     cursor.close()
+    if progress_callback:
+        progress_callback(0.9, f"Fetched {len(rows):,} records. Saving to disk...")
+        
     logger.info(f"Fetched {len(rows)} records from {table_name}")
     return rows
 
@@ -150,14 +173,89 @@ def load_jobs_json(json_path: str) -> list:
 
 def get_jobs_json_metadata(json_path: str) -> dict:
     """
-    Read only the metadata from the JSON file (without loading all records).
+    Read only the metadata header from the JSON file without loading all records.
+    Prefers the lightweight jobs_meta.json if it exists (instant read).
+    Falls back to regex head-read on the full file if meta file is missing.
     """
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    import re
+    # Fast path: prefer pre-built meta file
+    meta_path = os.path.join(os.path.dirname(json_path), "jobs_meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
 
-    if isinstance(data, dict) and "metadata" in data:
-        return data["metadata"]
-    return {"total_records": "unknown", "fetched_at": "unknown"}
+    # Fallback: regex scan of first 2KB (avoids parsing the full 1.5GB file)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            head = f.read(2048)
+
+        fetched_at = ""
+        total_records = "unknown"
+
+        m_fetched = re.search(r'"fetched_at"\s*:\s*"([^"]+)"', head)
+        if m_fetched:
+            fetched_at = m_fetched.group(1)
+
+        m_total = re.search(r'"total_records"\s*:\s*(\d+)', head)
+        if m_total:
+            total_records = int(m_total.group(1))
+
+        if not m_fetched and not m_total:
+            file_size = os.path.getsize(json_path)
+            return {"total_records": "unknown", "fetched_at": None,
+                    "file_size_mb": round(file_size / 1024 / 1024, 1)}
+
+        return {"fetched_at": fetched_at or None, "total_records": total_records}
+    except Exception:
+        return {"total_records": "unknown", "fetched_at": None}
+
+
+def save_jobs_paginated(records: list, data_dir: str) -> None:
+    """
+    Write lightweight index files alongside the full jobs.json for fast serving:
+      - jobs_meta.json   : tiny file with count + timestamp (~500 bytes)
+      - jobs_index.json  : display fields only for Jobs Explorer (~40MB for 545k records)
+
+    The full jobs.json is NOT touched — training still reads it directly.
+    """
+    INDEX_FIELDS = [
+        "url", "title", "company_name", "location", "experience",
+        "keyskills", "role", "salary", "industry_type", "employment_type",
+        "education", "posted",
+    ]
+    os.makedirs(data_dir, exist_ok=True)
+
+    # 1. Write meta file (instant status checks)
+    meta = {
+        "fetched_at": datetime.now().isoformat(),
+        "total_records": len(records),
+        "source": "Oracle JOBDETAILS table",
+    }
+    meta_path = os.path.join(data_dir, "jobs_meta.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+    logger.info(f"Wrote jobs_meta.json ({len(records)} records)")
+
+    # 2. Write lightweight index (display fields only)
+    index_records = []
+    for rec in records:
+        entry = {k: rec.get(k, "") for k in INDEX_FIELDS if k in rec or rec.get(k) is not None}
+        # Keep full jobdescription for display
+        desc = rec.get("jobdescription", "")
+        if desc:
+            entry["jobdescription"] = desc
+        index_records.append(entry)
+
+    index_path = os.path.join(data_dir, "jobs_index.json")
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump({"metadata": meta, "jobs": index_records}, f, ensure_ascii=False)
+    size_mb = os.path.getsize(index_path) / 1024 / 1024
+    logger.info(f"Wrote jobs_index.json ({size_mb:.1f} MB, {len(index_records)} records)")
+
+
 
 
 def fetch_and_save(host: str = "localhost",
@@ -167,7 +265,8 @@ def fetch_and_save(host: str = "localhost",
                    password: str = "system",
                    output_path: str = "data/jobs.json",
                    table_name: str = "JOBDETAILS",
-                   limit: int = None) -> tuple:
+                   limit: int = None,
+                   progress_callback=None) -> tuple:
     """
     Full pipeline: connect → fetch → save → disconnect.
 
@@ -175,7 +274,9 @@ def fetch_and_save(host: str = "localhost",
     """
     conn = connect_oracle(host, port, service_name, user, password)
     try:
-        records = fetch_jobs(conn, table_name, limit)
+        if progress_callback:
+            progress_callback(0.05, "Connected to Oracle. Fetching records...")
+        records = fetch_jobs(conn, table_name, limit, progress_callback)
         save_jobs_json(records, output_path)
         return len(records), output_path
     finally:

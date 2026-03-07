@@ -9,13 +9,14 @@ import json
 import tempfile
 import logging
 import multiprocessing
+import pandas as pd
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 # Silence joblib physical core warning on CPUs with P/E cores (like i7-14700HX)
 os.environ["LOKY_MAX_CPU_COUNT"] = str(multiprocessing.cpu_count())
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -42,8 +43,9 @@ from skill_intelligence import (
 from gap_analyzer import analyze_gaps, get_gap_summary
 from recommendation_engine import generate_recommendations, generate_general_tips
 from report_generator import generate_full_report, export_csv, export_json
-from oracle_connector import fetch_and_save, get_jobs_json_metadata
+from oracle_connector import fetch_and_save, get_jobs_json_metadata, save_jobs_paginated
 from model_manager import save_model, load_model, is_model_trained
+import task_manager
 
 # ── Logging Setup (must be before any logger usage) ────
 from logging_config import setup_logging, log_banner, log_stage
@@ -81,8 +83,43 @@ app.add_middleware(
 
 # ── Database ──────────────────────────────────
 
+def run_connect_db_task(task_id: str, host: str, port: int, service_name: str, user: str, password: str, table_name: str):
+    """Background task to fetch jobs from Oracle and build index without blocking the API."""
+    try:
+        def progress_cb(pct, msg):
+            task_manager.update_task(task_id, progress=pct, message=msg)
+            
+        task_manager.update_task(task_id, status="running", message="Connecting to Oracle database...")
+        
+        count, path = fetch_and_save(
+            host=host, port=port, service_name=service_name,
+            user=user, password=password,
+            output_path=JOBS_JSON_PATH, table_name=table_name,
+            progress_callback=progress_cb
+        )
+        task_manager.update_task(task_id, progress=0.95, message="Building index files for fast searching...")
+        
+        # Build lightweight index files for fast Jobs Explorer serving
+        import json as _json
+        with open(JOBS_JSON_PATH, "r", encoding="utf-8") as _f:
+            _d = _json.load(_f)
+        _records = _d["jobs"] if isinstance(_d, dict) and "jobs" in _d else _d
+        save_jobs_paginated(_records, os.path.dirname(JOBS_JSON_PATH))
+        
+        # Invalidate Explorer cache
+        global GLOBAL_JOBS_CACHE, GLOBAL_JOBS_CACHE_MTIME
+        GLOBAL_JOBS_CACHE = None
+        GLOBAL_JOBS_CACHE_MTIME = 0
+        
+        task_manager.update_task(task_id, status="completed", progress=1.0, 
+                                 message="Import complete!", result={"count": count, "path": path})
+    except Exception as e:
+        logger.error(f"DB Import Task {task_id} failed: {e}")
+        task_manager.update_task(task_id, status="failed", error=str(e), message=f"Failed: {str(e)}")
+
 @app.post("/api/connect-db")
 async def connect_db(
+    background_tasks: BackgroundTasks,
     host: str = Form(default="localhost"),
     port: int = Form(default=1521),
     service_name: str = Form(default="XE"),
@@ -90,16 +127,21 @@ async def connect_db(
     password: str = Form(default="system"),
     table_name: str = Form(default="JOBDETAILS"),
 ):
-    """Connect to Oracle, fetch jobs, save to data/jobs.json."""
-    try:
-        count, path = fetch_and_save(
-            host=host, port=int(port), service_name=service_name,
-            user=user, password=password,
-            output_path=JOBS_JSON_PATH, table_name=table_name,
-        )
-        return {"status": "ok", "count": count, "path": path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Start background fetch from Oracle, return task tracking ID instantly."""
+    task_id = task_manager.create_task("Fetch from Oracle DB")
+    background_tasks.add_task(
+        run_connect_db_task, task_id, 
+        host, int(port), service_name, user, password, table_name
+    )
+    return {"status": "accepted", "task_id": task_id}
+
+@app.get("/api/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    """Poll for background task progress and status."""
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 
 @app.get("/api/jobs-status")
@@ -114,7 +156,10 @@ async def jobs_status():
     return {"exists": False}
 
 
-# Cache for jobs to speed up Jobs Explorer
+# Index file path (lightweight display-only copy of jobs)
+JOBS_INDEX_PATH = os.path.join(os.path.dirname(JOBS_JSON_PATH), "jobs_index.json")
+
+# Cache for Jobs Explorer — uses the index file when available
 GLOBAL_JOBS_CACHE = None
 GLOBAL_JOBS_CACHE_MTIME = 0
 
@@ -124,17 +169,22 @@ async def jobs_data(
     page_size: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
 ):
-    """Return paginated jobs from the cached jobs.json for the jobs listing page."""
+    """Return paginated jobs using the lightweight index file (preferred) or full jobs.json."""
     global GLOBAL_JOBS_CACHE, GLOBAL_JOBS_CACHE_MTIME
 
-    if not os.path.exists(JOBS_JSON_PATH):
+    # Prefer the lightweight index if it exists (~40MB vs 1.5GB)
+    source_path = JOBS_INDEX_PATH if os.path.exists(JOBS_INDEX_PATH) else JOBS_JSON_PATH
+
+    if not os.path.exists(source_path) and not os.path.exists(JOBS_JSON_PATH):
         raise HTTPException(status_code=404, detail="No job data found. Fetch from DB or upload first.")
-        
+
+    if not os.path.exists(source_path):
+        source_path = JOBS_JSON_PATH
+
     try:
-        current_mtime = os.path.getmtime(JOBS_JSON_PATH)
+        current_mtime = os.path.getmtime(source_path)
         if GLOBAL_JOBS_CACHE is None or current_mtime > GLOBAL_JOBS_CACHE_MTIME:
-            # Load into cache
-            with open(JOBS_JSON_PATH, "r", encoding="utf-8") as f:
+            with open(source_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict) and "jobs" in data:
                 all_jobs = data["jobs"]
@@ -145,21 +195,11 @@ async def jobs_data(
             else:
                 all_jobs = []
                 metadata = {}
-            
-            GLOBAL_JOBS_CACHE = {
-                "jobs": all_jobs,
-                "metadata": metadata
-            }
+            GLOBAL_JOBS_CACHE = {"jobs": all_jobs, "metadata": metadata}
             GLOBAL_JOBS_CACHE_MTIME = current_mtime
-            
+
         all_jobs = GLOBAL_JOBS_CACHE["jobs"]
         metadata = GLOBAL_JOBS_CACHE["metadata"]
-
-        # Strip heavy fields to reduce payload size
-        LIGHT_FIELDS = ["title", "company_name", "companyname", "location",
-                        "experience", "keyskills", "role", "salary",
-                        "industry_type", "industrytype", "employment_type",
-                        "employmenttype", "education", "posted", "url"]
 
         # Server-side search
         if search:
@@ -174,21 +214,10 @@ async def jobs_data(
 
         total = len(all_jobs)
         start = page * page_size
-        end = start + page_size
-        page_jobs = all_jobs[start:end]
-
-        # Return only lightweight fields per job
-        light_jobs = []
-        for j in page_jobs:
-            light = {k: j.get(k, "") for k in LIGHT_FIELDS if k in j}
-            # Include a truncated description (max 500 chars)
-            desc = j.get("jobdescription", "")
-            if desc:
-                light["jobdescription"] = desc[:500]
-            light_jobs.append(light)
+        page_jobs = all_jobs[start:start + page_size]
 
         return {
-            "jobs": light_jobs,
+            "jobs": page_jobs,
             "metadata": metadata,
             "total": total,
             "page": page,
@@ -199,11 +228,106 @@ async def jobs_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/sample-jobs-json")
+async def sample_jobs_json():
+    """Return a downloadable sample JSON showing the expected job data format."""
+    sample = {
+        "metadata": {
+            "fetched_at": "2026-01-01T00:00:00",
+            "total_records": 3,
+            "source": "Sample — replace with your data"
+        },
+        "jobs": [
+            {
+                "title": "Software Engineer",
+                "company_name": "Acme Corp",
+                "location": "Bangalore, India",
+                "experience": "2-5 Yrs",
+                "salary": "8-14 LPA",
+                "keyskills": "Java, Spring Boot, Microservices, REST API, Docker",
+                "role": "Software / IT Engineer",
+                "industry_type": "IT Services & Consulting",
+                "employment_type": "Full Time, Permanent",
+                "education": "B.Tech/B.E.",
+                "posted": "2026-01-01",
+                "url": "https://example.com/jobs/123",
+                "jobdescription": "We are looking for a backend software engineer with experience in Java and Spring Boot to build scalable microservices."
+            },
+            {
+                "title": "Data Scientist",
+                "company_name": "DataViz Pvt Ltd",
+                "location": "Hyderabad, India",
+                "experience": "3-7 Yrs",
+                "salary": "12-22 LPA",
+                "keyskills": "Python, Machine Learning, TensorFlow, NLP, SQL",
+                "role": "Data Science & Analytics",
+                "industry_type": "Analytics / KPO / Research",
+                "employment_type": "Full Time, Permanent",
+                "education": "M.Tech/M.E., M.Sc.",
+                "posted": "2026-01-02",
+                "url": "https://example.com/jobs/456",
+                "jobdescription": "Seeking a data scientist to build ML models and NLP pipelines for our analytics platform."
+            },
+            {
+                "title": "DevOps Engineer",
+                "company_name": "CloudSystems Ltd",
+                "location": "Pune, India",
+                "experience": "4-8 Yrs",
+                "salary": "15-25 LPA",
+                "keyskills": "AWS, Kubernetes, Docker, Terraform, CI/CD, Linux",
+                "role": "DevOps / Infrastructure",
+                "industry_type": "IT Services & Consulting",
+                "employment_type": "Full Time, Permanent",
+                "education": "B.Tech/B.E.",
+                "posted": "2026-01-03",
+                "url": "https://example.com/jobs/789",
+                "jobdescription": "Looking for a DevOps engineer to manage cloud infrastructure, CI/CD pipelines and Kubernetes deployments."
+            }
+        ]
+    }
+    return JSONResponse(
+        content=sample,
+        headers={"Content-Disposition": "attachment; filename=sample_jobs.json"}
+    )
+
+
+
 # ── File Upload ───────────────────────────────
 
+def run_upload_jobs_task(task_id: str, tmp_path: str):
+    """Background task to ingest uploaded jobs files and save to disk."""
+    try:
+        task_manager.update_task(task_id, status="running", progress=0.2, message="Ingesting file and analyzing schema...")
+        df = ingest_jobs(tmp_path)
+        
+        task_manager.update_task(task_id, progress=0.5, message=f"Parsed {len(df):,} rows. Validating and saving to disk...")
+        records = df.to_dict("records")
+        from oracle_connector import save_jobs_json
+        
+        save_jobs_json(records, JOBS_JSON_PATH)
+        task_manager.update_task(task_id, progress=0.8, message="Building lightweight index for Jobs Explorer...")
+        save_jobs_paginated(records, os.path.dirname(JOBS_JSON_PATH))
+        
+        # Invalidate Explorer cache
+        global GLOBAL_JOBS_CACHE, GLOBAL_JOBS_CACHE_MTIME
+        GLOBAL_JOBS_CACHE = None
+        GLOBAL_JOBS_CACHE_MTIME = 0
+        
+        task_manager.update_task(task_id, status="completed", progress=1.0, 
+                                 message="Upload processed successfully!", result={"count": len(df)})
+    except Exception as e:
+        logger.error(f"Upload Task {task_id} failed: {e}")
+        task_manager.update_task(task_id, status="failed", error=str(e), message=f"Failed: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
 @app.post("/api/upload-jobs")
-async def upload_jobs(file: UploadFile = File(...)):
-    """Upload a job dataset (CSV/JSON/Excel) and save as jobs.json."""
+async def upload_jobs(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Upload a job dataset (CSV/JSON/Excel), start background ingestion, and return task tracking ID."""
     ext = file.filename.rsplit(".", 1)[-1].lower()
     if ext not in ("csv", "json", "jsonl", "xlsx", "xls"):
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -213,17 +337,10 @@ async def upload_jobs(file: UploadFile = File(...)):
         tmp.write(content)
         tmp_path = tmp.name
 
-    try:
-        df = ingest_jobs(tmp_path)
-        # Save as standardised jobs.json
-        records = df.to_dict("records")
-        from oracle_connector import save_jobs_json
-        save_jobs_json(records, JOBS_JSON_PATH)
-        return {"status": "ok", "count": len(df)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        os.unlink(tmp_path)
+    task_id = task_manager.create_task(f"Upload and process {file.filename}")
+    background_tasks.add_task(run_upload_jobs_task, task_id, tmp_path)
+    
+    return {"status": "accepted", "task_id": task_id}
 
 
 @app.post("/api/upload-resume")
@@ -307,20 +424,26 @@ async def parse_advanced(file: UploadFile = File(...)):
 
 # ── Pipeline ──────────────────────────────────
 
-def _run_training_logic(role: Optional[str] = None):
+def _run_training_logic(role: Optional[str] = None, shared_df: pd.DataFrame = None, preprocessed_corpus: List[str] = None):
     """Core logic to process jobs, vectorize, and save the model for a specific role."""
     import time as _time
-    if not os.path.exists(JOBS_JSON_PATH):
-        raise HTTPException(status_code=400, detail="No job data found. Fetch from DB or upload first.")
-
     pipeline_start = _time.time()
+    
     log_banner(logger, f"TRAINING PIPELINE START {'[' + role.upper() + ']' if role else '[ALL]'}")
     log_memory(logger, "pipeline start")
 
     # 1. Load jobs
     log_stage(logger, 1, 7, "Data Ingestion")
     t0 = _time.time()
-    job_df = ingest_jobs(JOBS_JSON_PATH)
+    
+    if shared_df is not None:
+        logger.info("Using pre-loaded shared dataset from memory")
+        job_df = shared_df.copy() # Local copy for role-specific filtering
+    else:
+        if not os.path.exists(JOBS_JSON_PATH):
+            raise HTTPException(status_code=400, detail="No job data found. Fetch from DB or upload first.")
+        job_df = ingest_jobs(JOBS_JSON_PATH)
+        
     logger.info(f"[OK] Loaded {len(job_df):,} unique jobs")
     
     # 1.1 Filter by role if specified
@@ -341,10 +464,15 @@ def _run_training_logic(role: Optional[str] = None):
         logger.info(f"Filtering jobs for role: {role_key}")
         pattern = JOB_ROLES[role_key]["pattern"]
 
-        job_df = job_df[
-            job_df["combined_text"].str.contains(pattern, case=False, regex=True) |
-            job_df["title"].str.contains(pattern, case=False, regex=True)
-        ].copy()
+        # Create mask to filter both DataFrame and pre-processed Corpus
+        mask = (job_df["combined_text"].str.contains(pattern, case=False, regex=True) |
+                job_df["title"].str.contains(pattern, case=False, regex=True))
+        
+        if preprocessed_corpus is not None:
+            # Important: Filter the corpus to align with the filtered dataframe
+            preprocessed_corpus = [preprocessed_corpus[i] for i, m in enumerate(mask) if m]
+            
+        job_df = job_df[mask].copy()
         logger.info(f"Filtered to {len(job_df):,} jobs for {role_key}")
         
         if len(job_df) == 0:
@@ -356,7 +484,17 @@ def _run_training_logic(role: Optional[str] = None):
     # 2. Process job texts
     log_stage(logger, 2, 7, "Text Processing")
     t0 = _time.time()
-    processed_corpus = process_series(job_df["combined_text"])
+    
+    if preprocessed_corpus is not None:
+        logger.info("⚡ [Performance] Reusing pre-processed text corpus (Skipping Lemmatization)")
+        processed_corpus = preprocessed_corpus
+        # Safety check: ensure lengths match
+        if len(processed_corpus) != len(job_df):
+            logger.warning(f"Corpus size mismatch ({len(processed_corpus)} vs {len(job_df)}). Recalculating...")
+            processed_corpus = process_series(job_df["combined_text"])
+    else:
+        processed_corpus = process_series(job_df["combined_text"])
+        
     logger.info(f"[OK] Text processing complete in {_time.time()-t0:.1f}s")
     check_memory("after text processing")
 
@@ -399,7 +537,12 @@ def _run_training_logic(role: Optional[str] = None):
     # 7. Save model
     log_stage(logger, 7, 7, "Saving Model")
     t0 = _time.time()
-    lightweight_job_df = job_df[["job_id", "title"]].copy()
+    cols = ["job_id", "title"]
+    if "url" in job_df.columns:
+        cols.append("url")
+    if "jobdescription" in job_df.columns:
+        cols.append("jobdescription")
+    lightweight_job_df = job_df[cols].copy()
 
     model_data = {
         "job_df": lightweight_job_df,
@@ -419,13 +562,13 @@ def _run_training_logic(role: Optional[str] = None):
     logger.info(f"[OK] Model ({role or 'all'}) saved in {_time.time()-t0:.1f}s")
 
     total_time = _time.time() - pipeline_start
-    return len(job_df), total_time
+    return len(job_df), total_time, processed_corpus
 
 @app.post("/api/train-model")
 async def train_model(role: Optional[str] = Form(None)):
     """Process jobs (optionally filtered by role), vectorize, and save the model to disk."""
     try:
-        count, total_time = _run_training_logic(role)
+        count, total_time, _ = _run_training_logic(role)
         return {"status": "ok", "message": f"Successfully trained model on {count} jobs in {total_time:.1f}s."}
     except HTTPException:
         raise
@@ -448,15 +591,41 @@ async def train_all_models():
     start_all = time.time()
 
     try:
+        # Optimization: User has 32GB RAM. Load the massive 1.5GB dataset once in the parent.
+        # This saves nearly 1 minute of disk I/O and parsing per role.
+        from data_ingestion import ingest_jobs
+        logger.info(f"🚀 [Performance] Pre-loading master dataset for {len(roles_to_train)} roles...")
+        master_df = ingest_jobs(JOBS_JSON_PATH)
+        
+        master_corpus = None # Cache for lemmatized text
+
         for r in roles_to_train:
-            logger.info(f"--- Bulk Training Stage: {r.upper()} ---")
-            count, t = _run_training_logic(r)
-            results.append({"role": r, "jobs": count, "time": round(t, 2)})
+            t0 = time.time()
+            
+            # Pass the master_corpus if we've already lemmatized the "all" set.
+            # This skips 16 minutes of CPU work per role.
+            count, duration, role_corpus = _run_training_logic(
+                role=r, 
+                shared_df=master_df, 
+                preprocessed_corpus=master_corpus if r != "all" else None
+            )
+            
+            # Cache the "all" results for all subsequent role models
+            if r == "all":
+                master_corpus = role_corpus
+                logger.info(f"✅ [Performance] Master corpus cached for {len(master_corpus):,} items.")
+            
+            results.append({
+                "role": r,
+                "count": count,
+                "duration": duration,
+                "status": "ok"
+            })
         
         total_duration = time.time() - start_all
         return {
             "status": "ok",
-            "message": f"Successfully trained {len(roles_to_train)} models in {total_duration:.1f}s.",
+            "message": f"Successfully trained {len(roles_to_train)} models in {total_duration:.1f}s (Optimized shared-memory mode).",
             "details": results
         }
     except Exception as e:
@@ -484,10 +653,16 @@ async def model_status():
     status["software_developer"] = is_model_trained("software_engineer")
     status["data"] = is_model_trained("data_scientist")
     status["devops"] = is_model_trained("devops_engineer")
-    
+
+    # Phase 1 — semantic model status
+    from model_manager import ModelManager
+    sem_model = ModelManager.get_semantic_model()
+
     return {
         "trained": any(status.values()),
-        "roles": status
+        "roles": status,
+        "semantic_model_loaded": sem_model is not None,
+        "semantic_model_name":   "all-MiniLM-L6-v2",
     }
 
 
@@ -621,6 +796,58 @@ async def quick_match(
     except Exception as e:
         logger.exception("Quick match error")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai-review")
+async def ai_review(
+    resume_text:      str = Form(...),
+    jd_text:          str = Form(...),
+    jd_title:         str = Form(""),
+    missing_keywords: str = Form(""),  # JSON-encoded list
+    recommendations:  str = Form(""),  # JSON-encoded list
+):
+    """
+    Phase 2 — AI Resume Reviewer.
+    Identifies weak bullets in the resume and returns Gemini-generated rewrites
+    aligned to the job description. Requires GEMINI_API_KEY in .env.
+    """
+    from ai_reviewer import extract_weak_bullets, generate_rewrites
+
+    try:
+        missing_list = json.loads(missing_keywords) if missing_keywords else []
+    except Exception:
+        missing_list = []
+
+    try:
+        recs_list = json.loads(recommendations) if recommendations else []
+    except Exception:
+        recs_list = []
+
+    bullets = extract_weak_bullets(resume_text, missing_list, recs_list)
+
+    if not bullets:
+        return {
+            "status":    "ok",
+            "available": True,
+            "rewrites":  [],
+            "message":   "No clear bullet candidates found — paste your resume as plain text for best results",
+        }
+
+    result = generate_rewrites(
+        resume_text=resume_text,
+        jd_text=jd_text,
+        jd_title=jd_title,
+        missing_keywords=missing_list,
+        recommendations=recs_list,
+        bullets_to_rewrite=bullets,
+    )
+
+    return {
+        "status":    "ok",
+        "available": result["available"],
+        "rewrites":  result["rewrites"],
+        "error":     result.get("error"),
+    }
 
 
 @app.post("/api/run-pipeline")

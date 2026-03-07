@@ -272,14 +272,45 @@ def compute_composite_score(
         ats_norm = ats_result["score"] / 100.0
     logger.info(f"  ATS parseability:       {ats_norm:.3f}")
 
-    # Weighted composite
-    overall = (
-        w["keyword_similarity"] * kw_sim
-        + w["skill_coverage"] * skill_cov
-        + w["job_title_alignment"] * title_align
-        + w["experience_relevance"] * exp_rel
-        + w["ats_parseability"] * ats_norm
-    )
+    # ── Phase 1: Semantic similarity (6th component) ──────────────────────
+    from matching_engine import compute_semantic_similarity
+    sem = compute_semantic_similarity(resume_text, jd_text)
+    logger.info(f"  Semantic similarity:    {sem.get('score')} (available={sem['available']})")
+
+    # ── Weight selection — semantic gets 20% when available ───────────────
+    if sem["available"] and sem["score"] is not None:
+        w = {
+            "semantic_similarity":  0.20,
+            "keyword_similarity":   0.22,
+            "skill_coverage":       0.20,
+            "job_title_alignment":  0.13,
+            "experience_relevance": 0.12,
+            "ats_parseability":     0.13,
+        }
+        overall = (
+            w["semantic_similarity"]  * (sem["score"] / 100.0)
+            + w["keyword_similarity"] * kw_sim
+            + w["skill_coverage"]     * skill_cov
+            + w["job_title_alignment"] * title_align
+            + w["experience_relevance"] * exp_rel
+            + w["ats_parseability"]   * ats_norm
+        )
+    else:
+        # Semantic unavailable — distribute its weight across the five components
+        w = {
+            "keyword_similarity":   0.30,
+            "skill_coverage":       0.25,
+            "job_title_alignment":  0.15,
+            "experience_relevance": 0.15,
+            "ats_parseability":     0.15,
+        }
+        overall = (
+            w["keyword_similarity"]   * kw_sim
+            + w["skill_coverage"]     * skill_cov
+            + w["job_title_alignment"] * title_align
+            + w["experience_relevance"] * exp_rel
+            + w["ats_parseability"]   * ats_norm
+        )
 
     # Penalty for missing critical skills (top JD skills not in resume)
     if jd_skills and resume_skills:
@@ -292,11 +323,15 @@ def compute_composite_score(
             logger.info(f"  Critical skill penalty: -{penalty:.3f} ({len(missing_critical)} missing)")
 
     component_scores = {
-        "keyword_similarity": round(kw_sim * 100, 1),
-        "skill_coverage": round(skill_cov * 100, 1),
-        "job_title_alignment": round(title_align * 100, 1),
+        "keyword_similarity":   round(kw_sim * 100, 1),
+        "skill_coverage":       round(skill_cov * 100, 1),
+        "job_title_alignment":  round(title_align * 100, 1),
         "experience_relevance": round(exp_rel * 100, 1),
-        "ats_parseability": round(ats_norm * 100, 1),
+        "ats_parseability":     round(ats_norm * 100, 1),
+        # Semantic fields — None when model is unavailable
+        "semantic_similarity":  sem["score"],
+        "semantic_confidence":  sem["confidence"],
+        "semantic_available":   sem["available"],
     }
 
     overall_score = round(float(np.clip(overall * 100, 0, 100)), 1)
@@ -306,6 +341,6 @@ def compute_composite_score(
 
     return {
         "overall_match_score": overall_score,
-        "component_scores": component_scores,
-        "weights_used": w,
+        "component_scores":    component_scores,
+        "weights_used":        w,
     }

@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 import hashlib
 import logging
+from pydantic import ValidationError
+from models import JobSchema
 
 logger = logging.getLogger(__name__)
 
@@ -33,33 +35,47 @@ def load_jobs(path: str) -> pd.DataFrame:
     # Normalise column names
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
 
-    # Validate required columns
-    required = {"title", "keyskills", "jobdescription"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+    # Fill NaN text fields with empty strings
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].fillna("")
+
+    # -------------------------------------------------------------
+    # STRICT SCHEMA VALIDATION VIA PYDANTIC
+    # -------------------------------------------------------------
+    records = df.to_dict("records")
+    valid_records = []
+    validation_errors = []
+
+    for idx, rec in enumerate(records):
+        try:
+            # Pydantic will rigorously coerce types and check non-empty constraints
+            valid_job = JobSchema(**rec)
+            valid_records.append(valid_job.dict(exclude_unset=True))
+        except ValidationError as e:
+            # Extract clean error messages for the user
+            error_msgs = []
+            for err in e.errors():
+                field = ".".join(str(loc) for loc in err["loc"])
+                msg = err["msg"]
+                error_msgs.append(f"'{field}': {msg}")
+            
+            validation_errors.append(f"Row {idx+2}: {', '.join(error_msgs)}")
+
+    if validation_errors:
+        total_errors = len(validation_errors)
+        display_errors = validation_errors[:5]
+        error_summary = "\n".join(display_errors)
+        logger.warning(f"Dropped {total_errors} invalid rows during schema validation.\nSample errors:\n{error_summary}")
+
+    # Reconstruct dataframe with fully validated, guaranteed pure data
+    df = pd.DataFrame(valid_records)
 
     # Generate job_id if absent
     if "job_id" not in df.columns:
         df.insert(0, "job_id", range(1, len(df) + 1))
 
-    # Fill NaN text fields
-    text_cols = ["title", "keyskills", "jobdescription"]
-    for col in text_cols:
-        df[col] = df[col].fillna("")
-
-    # Fill optional text columns that might exist
-    optional_text_cols = [
-        "company_name", "experience", "salary", "location",
-        "role", "industry_type", "department", "employment_type",
-        "role_category", "education", "url", "rating", "reviews",
-        "posted", "openings", "applications",
-    ]
-    for col in optional_text_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna("")
-
-    logger.info(f"Loaded {len(df)} job records from {path}")
+    logger.info(f"Loaded and heavily validated {len(df)} job records from {path}")
     return df
 
 

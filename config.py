@@ -380,3 +380,17 @@ DEFAULT_N_CLUSTERS = 8
 TOP_SKILLS_REPORT_COUNT = 50
 TOP_MATCHES_COUNT = 20
 BOTTOM_MATCHES_COUNT = 10
+
+# ──────────────────────────────────────────────
+# Gemini AI Reviewer
+# ──────────────────────────────────────────────
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass  # python-dotenv optional — env vars can be set externally
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL   = "gemini-2.5-flash"
+GEMINI_ENABLED = bool(GEMINI_API_KEY)
+
