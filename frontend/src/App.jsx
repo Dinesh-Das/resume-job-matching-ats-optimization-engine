@@ -23,8 +23,8 @@ function Navbar() {
     return (
         <nav className="navbar" style={{ background: isHome ? 'transparent' : 'rgba(4,5,8,0.85)' }}>
             {/* Logo */}
-            <NavLink to="/" className="navbar-logo" style={{ textDecoration: 'none' }}>
-                <span className="navbar-logo-dot" />
+            <NavLink to="/" className="navbar-logo" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <img src="/ATS_ENGINE.png" alt="ATS Engine Logo" className="navbar-logo-img" />
                 <span>ATSENGINE</span>
             </NavLink>
 
