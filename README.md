@@ -12,33 +12,48 @@
 ## 🖼️ Visual Overview
 
 <div align="center">
+  <img src="frontend/public/ATS_ENGINE.png" alt="ATS Engine Logo" width="180"/>
+</div>
+
+<br/>
+
+<!-- ── Row 1: Full-width viewport screenshots ── -->
+<div align="center">
   <table>
     <tr>
-      <td align="center" width="33%">
-        <img src="frontend/public/Home.png" alt="Home Screen" width="100%"/><br/>
-        <sub><b>Home Screen</b></sub>
-      </td>
-      <td align="center" width="33%">
-        <img src="frontend/public/QuickMatch.png" alt="Quick Match Interface" width="100%"/><br/>
-        <sub><b>Quick Match Interface</b></sub>
-      </td>
-      <td align="center" width="33%">
+      <td align="center" width="50%">
         <img src="frontend/public/Dashboard.png" alt="Analysis Dashboard" width="100%"/><br/>
-        <sub><b>Analysis Dashboard</b></sub>
+        <sub><b>📊 Analysis Dashboard</b></sub>
+      </td>
+      <td align="center" width="50%">
+        <img src="frontend/public/TrainEngine.png" alt="Model Training Engine" width="100%"/><br/>
+        <sub><b>⚙️ Model Training Engine</b></sub>
       </td>
     </tr>
+  </table>
+</div>
+
+<br/>
+
+<!-- ── Row 2: Tall scrolling screenshots — shown at natural width, capped so they don't overwhelm ── -->
+<div align="center">
+  <table>
     <tr>
-      <td align="center" width="33%">
-        <img src="frontend/public/Corpus.png" alt="Job Corpus Explorer" width="100%"/><br/>
-        <sub><b>Job Corpus Explorer</b></sub>
+      <td align="center" width="25%">
+        <img src="frontend/public/Home.png" alt="Home Screen" width="220"/><br/>
+        <sub><b>🏠 Home &amp; Feature Overview</b><br/><i>scrolling page</i></sub>
       </td>
-      <td align="center" width="33%">
-        <img src="frontend/public/Report.png" alt="Detailed Report Export" width="100%"/><br/>
-        <sub><b>Detailed Report Export</b></sub>
+      <td align="center" width="25%">
+        <img src="frontend/public/QuickMatch.png" alt="Quick Match Interface" width="220"/><br/>
+        <sub><b>⚡ Quick Match + AI Rewriter</b><br/><i>scrolling page</i></sub>
       </td>
-      <td align="center" width="33%">
-        <img src="frontend/public/TrainEngine.png" alt="Model Training Engine" width="100%"/><br/>
-        <sub><b>Model Training Engine</b></sub>
+      <td align="center" width="25%">
+        <img src="frontend/public/Corpus.png" alt="Job Corpus Explorer" width="220"/><br/>
+        <sub><b>🗂️ Job Corpus Explorer</b><br/><i>scrolling list</i></sub>
+      </td>
+      <td align="center" width="25%">
+        <img src="frontend/public/Report.png" alt="Detailed Report Export" width="220"/><br/>
+        <sub><b>📄 Analysis Results &amp; Export</b><br/><i>scrolling report</i></sub>
       </td>
     </tr>
   </table>
