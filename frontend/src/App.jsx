@@ -21,7 +21,7 @@ function Navbar() {
     const isHome = location.pathname === '/'
 
     return (
-        <nav className="navbar" style={{ background: isHome ? 'transparent' : 'rgba(4,5,8,0.85)' }}>
+        <nav className="navbar">
             {/* Logo */}
             <NavLink to="/" className="navbar-logo" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <img src="/ATS_ENGINE.png" alt="ATS Engine Logo" className="navbar-logo-img" />

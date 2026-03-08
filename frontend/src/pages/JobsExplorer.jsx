@@ -96,121 +96,123 @@ export default function JobsExplorer() {
                         <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Loading jobs...</p>
                     </div>
                 ) : (
-                    <table className="data-table">
-                        <thead>
-                            <tr>
-                                <th style={{ width: 50 }}>#</th>
-                                <th>Title</th>
-                                <th>Company</th>
-                                <th>Location</th>
-                                <th>Experience</th>
-                                <th>Key Skills</th>
-                                <th>Link</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {jobs.map((job, i) => {
-                                const idx = page * PAGE_SIZE + i + 1
-                                const isExpanded = expandedId === idx
-                                return (
-                                    <React.Fragment key={idx}>
-                                        <tr onClick={() => setExpandedId(isExpanded ? null : idx)} style={{ cursor: 'pointer' }}>
-                                            <td style={{ color: 'var(--text-muted)' }}>{idx}</td>
-                                            <td style={{ fontWeight: 600, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {job.title || '—'}
-                                            </td>
-                                            <td>{job.company_name || job.companyname || '—'}</td>
-                                            <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {job.location || '—'}
-                                            </td>
-                                            <td>{job.experience || '—'}</td>
-                                            <td style={{ maxWidth: 250 }}>
-                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                                                    {(job.keyskills || '').split(',').slice(0, 4).map((s, si) =>
-                                                        s.trim() && <span key={si} className="badge badge-optional">{s.trim()}</span>
-                                                    )}
-                                                    {(job.keyskills || '').split(',').length > 4 && (
-                                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                                                            +{(job.keyskills || '').split(',').length - 4} more
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td onClick={e => e.stopPropagation()}>
-                                                {job.url && (
-                                                    <a href={job.url.startsWith('http') ? job.url : `https://${job.url}`} target="_blank" rel="noopener noreferrer"
-                                                        className="btn btn-sm btn-secondary"
-                                                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-                                                        title="Visit Job Post">
-                                                        🔗 Visit
-                                                    </a>
-                                                )}
-                                            </td>
-                                        </tr>
-                                        {isExpanded && (
-                                            <tr>
-                                                <td colSpan={7} style={{ padding: '1.5rem', background: 'rgba(99, 102, 241, 0.03)' }}>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.88rem' }}>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Role:</strong>{' '}
-                                                            {job.role || '—'}
-                                                        </div>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Salary:</strong>{' '}
-                                                            {job.salary || '—'}
-                                                        </div>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Industry:</strong>{' '}
-                                                            {job.industry_type || job.industrytype || '—'}
-                                                        </div>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Employment:</strong>{' '}
-                                                            {job.employment_type || job.employmenttype || '—'}
-                                                        </div>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Education:</strong>{' '}
-                                                            {job.education || '—'}
-                                                        </div>
-                                                        <div>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Posted:</strong>{' '}
-                                                            {job.posted || '—'}
-                                                        </div>
+                    <div className="table-responsive">
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th style={{ width: 50 }}>#</th>
+                                    <th>Title</th>
+                                    <th>Company</th>
+                                    <th>Location</th>
+                                    <th>Experience</th>
+                                    <th>Key Skills</th>
+                                    <th>Link</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {jobs.map((job, i) => {
+                                    const idx = page * PAGE_SIZE + i + 1
+                                    const isExpanded = expandedId === idx
+                                    return (
+                                        <React.Fragment key={idx}>
+                                            <tr onClick={() => setExpandedId(isExpanded ? null : idx)} style={{ cursor: 'pointer' }}>
+                                                <td style={{ color: 'var(--text-muted)' }}>{idx}</td>
+                                                <td style={{ fontWeight: 600, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {job.title || '—'}
+                                                </td>
+                                                <td>{job.company_name || job.companyname || '—'}</td>
+                                                <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {job.location || '—'}
+                                                </td>
+                                                <td>{job.experience || '—'}</td>
+                                                <td style={{ maxWidth: 250 }}>
+                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                                        {(job.keyskills || '').split(',').slice(0, 4).map((s, si) =>
+                                                            s.trim() && <span key={si} className="badge badge-optional">{s.trim()}</span>
+                                                        )}
+                                                        {(job.keyskills || '').split(',').length > 4 && (
+                                                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                                                +{(job.keyskills || '').split(',').length - 4} more
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    {job.jobdescription && (
-                                                        <div style={{ marginTop: '1rem' }}>
-                                                            <strong style={{ color: 'var(--text-secondary)' }}>Description:</strong>
-                                                            <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', lineHeight: 1.7, maxHeight: 200, overflow: 'auto', fontSize: '0.85rem' }}>
-                                                                {job.jobdescription}
-                                                            </p>
-                                                        </div>
-                                                    )}
-                                                    <div style={{ marginTop: '1rem' }}>
-                                                        <strong style={{ color: 'var(--text-secondary)' }}>All Skills:</strong>
-                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.5rem' }}>
-                                                            {(job.keyskills || '').split(',').map((s, si) =>
-                                                                s.trim() && <span key={si} className="badge badge-present">{s.trim()}</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
+                                                </td>
+                                                <td onClick={e => e.stopPropagation()}>
                                                     {job.url && (
-                                                        <a href={job.url} target="_blank" rel="noopener noreferrer"
-                                                            className="btn btn-sm btn-secondary" style={{ marginTop: '1rem' }}>
-                                                            🔗 View Original
+                                                        <a href={job.url.startsWith('http') ? job.url : `https://${job.url}`} target="_blank" rel="noopener noreferrer"
+                                                            className="btn btn-sm btn-secondary"
+                                                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                                                            title="Visit Job Post">
+                                                            🔗 Visit
                                                         </a>
                                                     )}
                                                 </td>
                                             </tr>
-                                        )}
-                                    </React.Fragment>
-                                )
-                            })}
-                            {jobs.length === 0 && !loading && (
-                                <tr><td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                                    No jobs match your search.
-                                </td></tr>
-                            )}
-                        </tbody>
-                    </table>
+                                            {isExpanded && (
+                                                <tr>
+                                                    <td colSpan={7} style={{ padding: '1.5rem', background: 'rgba(99, 102, 241, 0.03)' }}>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.88rem' }}>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Role:</strong>{' '}
+                                                                {job.role || '—'}
+                                                            </div>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Salary:</strong>{' '}
+                                                                {job.salary || '—'}
+                                                            </div>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Industry:</strong>{' '}
+                                                                {job.industry_type || job.industrytype || '—'}
+                                                            </div>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Employment:</strong>{' '}
+                                                                {job.employment_type || job.employmenttype || '—'}
+                                                            </div>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Education:</strong>{' '}
+                                                                {job.education || '—'}
+                                                            </div>
+                                                            <div>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Posted:</strong>{' '}
+                                                                {job.posted || '—'}
+                                                            </div>
+                                                        </div>
+                                                        {job.jobdescription && (
+                                                            <div style={{ marginTop: '1rem' }}>
+                                                                <strong style={{ color: 'var(--text-secondary)' }}>Description:</strong>
+                                                                <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem', lineHeight: 1.7, maxHeight: 200, overflow: 'auto', fontSize: '0.85rem' }}>
+                                                                    {job.jobdescription}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        <div style={{ marginTop: '1rem' }}>
+                                                            <strong style={{ color: 'var(--text-secondary)' }}>All Skills:</strong>
+                                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.5rem' }}>
+                                                                {(job.keyskills || '').split(',').map((s, si) =>
+                                                                    s.trim() && <span key={si} className="badge badge-present">{s.trim()}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {job.url && (
+                                                            <a href={job.url} target="_blank" rel="noopener noreferrer"
+                                                                className="btn btn-sm btn-secondary" style={{ marginTop: '1rem' }}>
+                                                                🔗 View Original
+                                                            </a>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    )
+                                })}
+                                {jobs.length === 0 && !loading && (
+                                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                                        No jobs match your search.
+                                    </td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 

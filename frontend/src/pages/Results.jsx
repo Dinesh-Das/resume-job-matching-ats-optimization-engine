@@ -272,57 +272,59 @@ export default function Results() {
                     {/* Top Matches */}
                     <div className="glass-card" style={{ marginTop: '1.5rem', padding: 0, overflow: 'hidden' }}>
                         <h3 style={{ padding: '1.25rem 1.5rem 0' }}>🏆 Top Matching Jobs</h3>
-                        <table className="data-table" style={{ marginTop: '0.75rem' }}>
-                            <thead>
-                                <tr>
-                                    <th>Rank</th>
-                                    <th>Job Title</th>
-                                    <th>Score</th>
-                                    <th>Match Level</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(s.top_matches || []).slice(0, 15).map((m, i) => {
-                                    const level = m.score >= 70 ? 'High' : m.score >= 40 ? 'Medium' : 'Low'
-                                    const cls = m.score >= 70 ? 'score-high' : m.score >= 40 ? 'score-mid' : 'score-low'
-                                    const isExpanded = expandedJob === i
-                                    return (
-                                        <React.Fragment key={i}>
-                                            <tr
-                                                onClick={() => setExpandedJob(isExpanded ? null : i)}
-                                                style={{ cursor: 'pointer', background: isExpanded ? 'var(--hover)' : '' }}
-                                            >
-                                                <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                                                <td style={{ fontWeight: 500 }}>
-                                                    {m.title}
-                                                </td>
-                                                <td className={cls} style={{ fontWeight: 700 }}>{m.score?.toFixed(1)}</td>
-                                                <td><span className={`badge badge-${level === 'High' ? 'present' : level === 'Medium' ? 'recommended' : 'critical'}`}>{level}</span></td>
-                                            </tr>
-                                            {isExpanded && (
-                                                <tr style={{ background: 'var(--hover)' }}>
-                                                    <td colSpan="4" style={{ padding: '0 1.5rem 1.5rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}>
-                                                        <div style={{ background: 'var(--deep)', padding: '1.25rem', borderRadius: '6px', border: '1px solid var(--border)', marginTop: '0.5rem' }}>
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                                                                <h4 style={{ margin: 0, color: 'var(--plasma)' }}>{m.title}</h4>
-                                                                {m.url && (
-                                                                    <a href={m.url} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm" style={{ padding: '0.3rem 0.8rem' }}>
-                                                                        VISIT POSTING ↗
-                                                                    </a>
-                                                                )}
-                                                            </div>
-                                                            <div style={{ maxHeight: '200px', overflowY: 'auto', paddingRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-                                                                {m.jobdescription || "No job description available."}
-                                                            </div>
-                                                        </div>
+                        <div className="table-responsive">
+                            <table className="data-table" style={{ marginTop: '0.75rem' }}>
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Job Title</th>
+                                        <th>Score</th>
+                                        <th>Match Level</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(s.top_matches || []).slice(0, 15).map((m, i) => {
+                                        const level = m.score >= 70 ? 'High' : m.score >= 40 ? 'Medium' : 'Low'
+                                        const cls = m.score >= 70 ? 'score-high' : m.score >= 40 ? 'score-mid' : 'score-low'
+                                        const isExpanded = expandedJob === i
+                                        return (
+                                            <React.Fragment key={i}>
+                                                <tr
+                                                    onClick={() => setExpandedJob(isExpanded ? null : i)}
+                                                    style={{ cursor: 'pointer', background: isExpanded ? 'var(--hover)' : '' }}
+                                                >
+                                                    <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                                    <td style={{ fontWeight: 500 }}>
+                                                        {m.title}
                                                     </td>
+                                                    <td className={cls} style={{ fontWeight: 700 }}>{m.score?.toFixed(1)}</td>
+                                                    <td><span className={`badge badge-${level === 'High' ? 'present' : level === 'Medium' ? 'recommended' : 'critical'}`}>{level}</span></td>
                                                 </tr>
-                                            )}
-                                        </React.Fragment>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+                                                {isExpanded && (
+                                                    <tr style={{ background: 'var(--hover)' }}>
+                                                        <td colSpan="4" style={{ padding: '0 1.5rem 1.5rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}>
+                                                            <div style={{ background: 'var(--deep)', padding: '1.25rem', borderRadius: '6px', border: '1px solid var(--border)', marginTop: '0.5rem' }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                                                    <h4 style={{ margin: 0, color: 'var(--plasma)' }}>{m.title}</h4>
+                                                                    {m.url && (
+                                                                        <a href={m.url} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm" style={{ padding: '0.3rem 0.8rem' }}>
+                                                                            VISIT POSTING ↗
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                                <div style={{ maxHeight: '200px', overflowY: 'auto', paddingRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                                                                    {m.jobdescription || "No job description available."}
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             )}
@@ -471,28 +473,30 @@ export default function Results() {
                         <div className="glass-card" style={{ marginTop: '2rem', padding: 0, overflow: 'hidden' }}>
                             <h3 style={{ padding: '1.25rem 1.5rem 0' }}>📊 Full Recommendations Table</h3>
                             <div style={{ overflow: 'auto' }}>
-                                <table className="data-table" style={{ marginTop: '0.75rem' }}>
-                                    <thead>
-                                        <tr>
-                                            <th>Skill</th>
-                                            <th>Priority</th>
-                                            <th>Section</th>
-                                            <th>Action</th>
-                                            <th>Weight</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {results.recommendations.map((r, i) => (
-                                            <tr key={i}>
-                                                <td style={{ fontWeight: 500 }}>{r.skill}</td>
-                                                <td><span className={`badge badge-${r.priority}`}>{r.priority}</span></td>
-                                                <td>{r.section}</td>
-                                                <td style={{ maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.action}</td>
-                                                <td style={{ color: 'var(--text-muted)' }}>{r.importance_weight?.toFixed(4)}</td>
+                                <div className="table-responsive">
+                                    <table className="data-table" style={{ marginTop: '0.75rem' }}>
+                                        <thead>
+                                            <tr>
+                                                <th>Skill</th>
+                                                <th>Priority</th>
+                                                <th>Section</th>
+                                                <th>Action</th>
+                                                <th>Weight</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            {results.recommendations.map((r, i) => (
+                                                <tr key={i}>
+                                                    <td style={{ fontWeight: 500 }}>{r.skill}</td>
+                                                    <td><span className={`badge badge-${r.priority}`}>{r.priority}</span></td>
+                                                    <td>{r.section}</td>
+                                                    <td style={{ maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.action}</td>
+                                                    <td style={{ color: 'var(--text-muted)' }}>{r.importance_weight?.toFixed(4)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     )}
