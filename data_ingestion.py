@@ -7,7 +7,6 @@ Supports both direct CSV uploads and Oracle-exported JSON (via oracle_connector)
 
 import json
 import pandas as pd
-import numpy as np
 import hashlib
 import logging
 from pydantic import ValidationError
@@ -25,12 +24,29 @@ def load_jobs(path: str) -> pd.DataFrame:
 
     if ext == "csv":
         df = pd.read_csv(path, dtype=str)
-    elif ext in ("json", "jsonl"):
+    elif ext == "jsonl":
+        records = []
+        with open(path, "r", encoding="utf-8") as stream:
+            for line_number, line in enumerate(stream, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid JSONL record on line {line_number}") from exc
+                if not isinstance(record, dict):
+                    raise ValueError(f"JSONL line {line_number} must contain a job object")
+                records.append(record)
+        df = pd.DataFrame(records)
+    elif ext == "json":
         df = _load_json_flexible(path)
     elif ext in ("xlsx", "xls"):
         df = pd.read_excel(path, dtype=str)
     else:
         raise ValueError(f"Unsupported file format: .{ext}")
+
+    if df.empty:
+        raise ValueError("No valid job records were provided")
 
     # Normalise column names
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
@@ -51,7 +67,7 @@ def load_jobs(path: str) -> pd.DataFrame:
         try:
             # Pydantic will rigorously coerce types and check non-empty constraints
             valid_job = JobSchema(**rec)
-            valid_records.append(valid_job.dict(exclude_unset=True))
+            valid_records.append(valid_job.model_dump())
         except ValidationError as e:
             # Extract clean error messages for the user
             error_msgs = []
@@ -67,6 +83,9 @@ def load_jobs(path: str) -> pd.DataFrame:
         display_errors = validation_errors[:5]
         error_summary = "\n".join(display_errors)
         logger.warning(f"Dropped {total_errors} invalid rows during schema validation.\nSample errors:\n{error_summary}")
+
+    if not valid_records:
+        raise ValueError("No valid job records remain after schema validation")
 
     # Reconstruct dataframe with fully validated, guaranteed pure data
     df = pd.DataFrame(valid_records)
@@ -118,14 +137,18 @@ def deduplicate_jobs(df: pd.DataFrame) -> pd.DataFrame:
     else:
         url_col = pd.Series([""] * len(df), index=df.index)
         
-    # 2. Compute a fallback key (title + description)
-    fallback_key = (df["title"].fillna("").str.strip().str.lower() + 
-                    df["jobdescription"].fillna("").str.strip().str.lower())
-    
-    # 3. Create a final deduplication key. 
-    # If the URL is missing, we prefix with "FALLBACK_" and attach the fallback string.
-    # If the URL exists, we just use the URL.
-    dedup_key = np.where(url_col != "", url_col, "FALLBACK_" + fallback_key)
+    # Keep field boundaries and company identity: "ab" + "c" must not alias
+    # "a" + "bc", nor should identical openings at different companies merge.
+    company = df.get("company_name", pd.Series("", index=df.index))
+    fallback_keys = zip(
+        company.fillna("").str.strip().str.lower(),
+        df["title"].fillna("").str.strip().str.lower(),
+        df["jobdescription"].fillna("").str.strip().str.lower(),
+    )
+    dedup_key = [
+        ("url", url) if url else ("fields", *fields)
+        for url, fields in zip(url_col, fallback_keys)
+    ]
                  
     df = df.assign(_dedup_key=dedup_key).drop_duplicates(subset="_dedup_key").drop(columns="_dedup_key").reset_index(drop=True)
     

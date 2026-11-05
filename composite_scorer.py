@@ -7,6 +7,7 @@ relevance, and ATS parseability into a weighted overall score.
 
 import re
 import logging
+import math
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -237,7 +238,8 @@ def compute_composite_score(
     ats_score : float, optional
         Pre-computed ATS parseability score (0-100). Will compute if None.
     weights : dict, optional
-        Component weights (must sum to 1.0).
+        Nonnegative component weights summing to 1.0; omitted components get zero.
+        A positive semantic weight requires an available semantic model.
 
     Returns
     -------
@@ -246,7 +248,15 @@ def compute_composite_score(
         component_scores: dict of component -> score (0-100)
         weights_used: dict
     """
-    w = weights or DEFAULT_WEIGHTS
+    if weights is not None:
+        allowed = set(DEFAULT_WEIGHTS) | {"semantic_similarity"}
+        if not isinstance(weights, dict) or not weights or set(weights) - allowed:
+            raise ValueError("Weights must be a nonempty mapping of known score components")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(value) or value < 0 for value in weights.values()):
+            raise ValueError("Weights must be finite nonnegative numbers")
+        if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+            raise ValueError("Weights must sum to 1.0")
 
     # Compute each component (all return 0-1)
     logger.info("Computing composite score components...")
@@ -278,7 +288,12 @@ def compute_composite_score(
     logger.info(f"  Semantic similarity:    {sem.get('score')} (available={sem['available']})")
 
     # ── Weight selection — semantic gets 20% when available ───────────────
-    if sem["available"] and sem["score"] is not None:
+    semantic_available = sem["available"] and sem["score"] is not None
+    if weights is not None:
+        w = dict(weights)
+        if w.get("semantic_similarity", 0) > 0 and not semantic_available:
+            raise ValueError("Semantic similarity weight requires an available model")
+    elif semantic_available:
         w = {
             "semantic_similarity":  0.20,
             "keyword_similarity":   0.22,
@@ -287,14 +302,6 @@ def compute_composite_score(
             "experience_relevance": 0.12,
             "ats_parseability":     0.13,
         }
-        overall = (
-            w["semantic_similarity"]  * (sem["score"] / 100.0)
-            + w["keyword_similarity"] * kw_sim
-            + w["skill_coverage"]     * skill_cov
-            + w["job_title_alignment"] * title_align
-            + w["experience_relevance"] * exp_rel
-            + w["ats_parseability"]   * ats_norm
-        )
     else:
         # Semantic unavailable — distribute its weight across the five components
         w = {
@@ -304,13 +311,15 @@ def compute_composite_score(
             "experience_relevance": 0.15,
             "ats_parseability":     0.15,
         }
-        overall = (
-            w["keyword_similarity"]   * kw_sim
-            + w["skill_coverage"]     * skill_cov
-            + w["job_title_alignment"] * title_align
-            + w["experience_relevance"] * exp_rel
-            + w["ats_parseability"]   * ats_norm
-        )
+    components = {
+        "keyword_similarity": kw_sim,
+        "skill_coverage": skill_cov,
+        "job_title_alignment": title_align,
+        "experience_relevance": exp_rel,
+        "ats_parseability": ats_norm,
+        "semantic_similarity": sem["score"] / 100.0 if semantic_available else 0.0,
+    }
+    overall = sum(weight * components[name] for name, weight in w.items())
 
     # Penalty for missing critical skills (top JD skills not in resume)
     if jd_skills and resume_skills:
