@@ -1,5 +1,7 @@
 # 🧠 Resume-Job Matching & ATS Optimization Engine
 
+[Interview case study, verification and remaining evidence](INTERVIEW.md)
+
 
 > **The smartest resume filter you'll ever face — now working for YOU instead of against you.**
 
