@@ -17,12 +17,15 @@ Run synthetic JSONL ingestion, show distinct jobs remain distinct, then run a sk
 After the repository's documented dependency setup, run these commands from its root. Use an activated Python environment where applicable; Maven offline mode requires cached dependencies.
 
 ```text
+python -m pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
 ## Recorded evidence
 
 8 offline regression tests passed. Scoring tests stub only semantic model availability/output; lexical and composite code run locally. Full OCR, Oracle and provider integrations were not exercised.
+
+On 2026-11-06, 11 tests passed after adding an HTTP regression for frontend path containment. The actual SPA route rejects encoded parent paths and Windows backslash traversal, while public assets and client routes remain available. The route is tested in an isolated FastAPI app so optional ML and Oracle services do not start.
 
 Behavioral regressions were reproduced before their fixes. Passing contract tests demonstrate the named behavior; they are not an AI accuracy rating.
 

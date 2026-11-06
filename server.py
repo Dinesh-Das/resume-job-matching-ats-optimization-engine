@@ -1042,8 +1042,17 @@ if os.path.exists(frontend_dist):
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         """Serve the React SPA — all non-API routes go to index.html."""
-        file_path = os.path.join(frontend_dist, full_path)
-        if os.path.isfile(file_path):
+        root = Path(frontend_dist).resolve()
+        requested = Path(full_path)
+        if requested.is_absolute() or requested.drive or "\\" in full_path:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            file_path = (root / requested).resolve()
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(status_code=404, detail="Not found") from None
+        if not file_path.is_relative_to(root):
+            raise HTTPException(status_code=404, detail="Not found")
+        if file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(os.path.join(frontend_dist, "index.html"))
 
