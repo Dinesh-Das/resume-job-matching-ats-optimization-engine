@@ -458,7 +458,7 @@ def extract_experience_years(resume_text: str) -> dict:
     years_found = []
 
     # Find all 4-digit years
-    all_years = [int(y) for y in re.findall(r"\b(19|20)\d{2}\b", resume_text)]
+    all_years = [int(y) for y in re.findall(r"\b(?:19|20)\d{2}\b", resume_text)]
     current_year = datetime.datetime.now().year
 
     # Filter reasonable years

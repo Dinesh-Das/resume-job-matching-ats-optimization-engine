@@ -27,6 +27,8 @@ python -m unittest discover -s tests -v
 
 On 2026-11-06, 11 tests passed after adding an HTTP regression for frontend path containment. The actual SPA route rejects encoded parent paths and Windows backslash traversal, while public assets and client routes remain available. The route is tested in an isolated FastAPI app so optional ML and Oracle services do not start.
 
+On 2026-11-07, all 13 offline tests passed. Quick match now passes original resume/JD text to composite scoring; corpus search normalizes only its TF-IDF input while retaining original resume dates and sections for scoring. Complete-year extraction handles month-named date ranges. An HTTP regression verifies the quick-match handoff and the parser test verifies dates; these tests do not establish real-world ranking calibration or full corpus/Oracle integration.
+
 Behavioral regressions were reproduced before their fixes. Passing contract tests demonstrate the named behavior; they are not an AI accuracy rating.
 
 ## Defensible resume wording

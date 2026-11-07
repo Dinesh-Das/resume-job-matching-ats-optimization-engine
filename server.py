@@ -679,7 +679,6 @@ async def quick_match(
     Returns the full structured output schema per specification.
     """
     import time as _time
-    from text_processor import process
     from skill_extractor import extract_skills_from_text
     from composite_scorer import compute_composite_score
     from ats_simulator import compute_ats_parseability_score, detect_formatting_issues
@@ -689,11 +688,6 @@ async def quick_match(
         t_start = _time.time()
         log_banner(logger, "QUICK MATCH ANALYSIS")
         log_memory(logger, "quick-match start")
-
-        # 1. Process texts
-        logger.info("📝 Processing resume and JD text...")
-        resume_processed = process(resume_text)
-        jd_processed = process(jd_text)
 
         # 2. Extract skills from both
         logger.info("🔍 Extracting skills...")
@@ -708,8 +702,8 @@ async def quick_match(
         # 4. Composite scoring
         logger.info("🎯 Computing composite score...")
         score_result = compute_composite_score(
-            resume_text=resume_processed,
-            jd_text=jd_processed,
+            resume_text=resume_text,
+            jd_text=jd_text,
             resume_skills=resume_skills,
             jd_skills=jd_skills,
             jd_title=jd_title,
@@ -919,9 +913,10 @@ async def run_pipeline(resume_text: str = Form(...), role: Optional[str] = Form(
         # Industry top skills act as JD skills for corpus mode
         industry_skills = model["industry_top_skills"]
 
-        # Composite score against best-match JD
+        # Composite score against the corpus skill profile. Keep source dates
+        # and section boundaries; normalization above is only for TF-IDF search.
         composite = compute_composite_score(
-            resume_text=resume_processed,
+            resume_text=resume_text,
             jd_text=" ".join(importance_df["skill"].tolist()) if not importance_df.empty else "",
             resume_skills=resume_skills,
             jd_skills=industry_skills,
